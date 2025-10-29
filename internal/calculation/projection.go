@@ -204,12 +204,13 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 		}
 
 		// Calculate Social Security benefits
+		// Note: SS benefits only start when both age-eligible AND retired
 		ssPersonA := decimal.Zero
-		if !personADeceased {
+		if !personADeceased && isPersonARetired {
 			ssPersonA = CalculateSSBenefitForYear(personA, scenario.PersonA.SSStartAge, year, assumptions.COLAGeneralRate)
 		}
 		ssPersonB := decimal.Zero
-		if !personBDeceased {
+		if !personBDeceased && isPersonBRetired {
 			ssPersonB = CalculateSSBenefitForYear(personB, scenario.PersonB.SSStartAge, year, assumptions.COLAGeneralRate)
 		}
 
