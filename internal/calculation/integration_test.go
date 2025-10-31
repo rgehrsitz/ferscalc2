@@ -453,6 +453,7 @@ func createTestConfiguration() *domain.Configuration {
 				},
 				// FICA tax configuration - 2025 values
 				FICATaxConfig: domain.FICATaxConfig{
+					Year:                   2025,
 					SocialSecurityWageBase: decimal.NewFromInt(176100),
 					SocialSecurityRate:     decimal.NewFromFloat(0.062),
 					MedicareRate:           decimal.NewFromFloat(0.0145),

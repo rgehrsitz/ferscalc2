@@ -163,6 +163,7 @@ global_assumptions:
     # FICA tax configuration - 2025 values
     # Source: Social Security Administration and IRS
     fica_tax_config:
+      year: 2025
       social_security_wage_base: "176100"   # 2025 SS wage base
       social_security_rate: "0.062"         # 6.2% Social Security tax
       medicare_rate: "0.0145"               # 1.45% Medicare tax

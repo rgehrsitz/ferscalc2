@@ -285,6 +285,9 @@ type StateLocalTaxConfig struct {
 
 // FICATaxConfig contains FICA tax configuration (updated annually)
 type FICATaxConfig struct {
+	// Tax year the configuration applies to
+	Year int `yaml:"year" json:"year"`
+
 	// Social Security tax
 	SocialSecurityWageBase decimal.Decimal `yaml:"social_security_wage_base" json:"social_security_wage_base"` // Default: 176100 (2025)
 	SocialSecurityRate     decimal.Decimal `yaml:"social_security_rate" json:"social_security_rate"`           // Default: 0.062 (6.2%)

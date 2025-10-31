@@ -213,8 +213,13 @@ func NewFICACalculator2025() *FICACalculator {
 
 // NewFICACalculator creates a new FICA calculator with configurable values
 func NewFICACalculator(config domain.FICATaxConfig) *FICACalculator {
+	year := config.Year
+	if year == 0 {
+		year = ProjectionBaseYear
+	}
+
 	return &FICACalculator{
-		Year:                2025, // TODO: Make year configurable
+		Year:                year,
 		SSWageBase:          config.SocialSecurityWageBase,
 		SSRate:              config.SocialSecurityRate,
 		MedicareRate:        config.MedicareRate,

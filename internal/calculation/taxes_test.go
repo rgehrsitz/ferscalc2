@@ -280,6 +280,39 @@ func TestFICACalculation(t *testing.T) {
 	}
 }
 
+func TestNewFICACalculatorUsesConfigYear(t *testing.T) {
+	config := domain.FICATaxConfig{
+		Year:                   2030,
+		SocialSecurityWageBase: decimal.NewFromInt(200000),
+		SocialSecurityRate:     decimal.NewFromFloat(0.062),
+		MedicareRate:           decimal.NewFromFloat(0.0145),
+		AdditionalMedicareRate: decimal.NewFromFloat(0.009),
+		HighIncomeThresholdMFJ: decimal.NewFromInt(400000),
+	}
+
+	calculator := NewFICACalculator(config)
+
+	assert.Equal(t, 2030, calculator.Year)
+	assert.True(t, calculator.SSWageBase.Equal(config.SocialSecurityWageBase))
+	assert.True(t, calculator.HighIncomeThreshold.Equal(config.HighIncomeThresholdMFJ))
+}
+
+func TestNewFICACalculatorDefaultsYear(t *testing.T) {
+	config := domain.FICATaxConfig{
+		SocialSecurityWageBase: decimal.NewFromInt(176100),
+		SocialSecurityRate:     decimal.NewFromFloat(0.062),
+		MedicareRate:           decimal.NewFromFloat(0.0145),
+		AdditionalMedicareRate: decimal.NewFromFloat(0.009),
+		HighIncomeThresholdMFJ: decimal.NewFromInt(250000),
+	}
+
+	calculator := NewFICACalculator(config)
+
+	assert.Equal(t, ProjectionBaseYear, calculator.Year)
+	assert.True(t, calculator.SSWageBase.Equal(config.SocialSecurityWageBase))
+	assert.True(t, calculator.HighIncomeThreshold.Equal(config.HighIncomeThresholdMFJ))
+}
+
 // TestFICAWithProration tests FICA calculations with partial year work
 func TestFICAWithProration(t *testing.T) {
 	calculator := NewFICACalculator2025()
