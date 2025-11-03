@@ -214,6 +214,43 @@ func TestFormatterAliasResolution(t *testing.T) {
 	}
 }
 
+func TestResolveFormatterCanonical(t *testing.T) {
+	f, canonical := ResolveFormatter("JSON-pretty")
+	if f == nil {
+		t.Fatalf("expected formatter for alias")
+	}
+	if canonical != "json" {
+		t.Fatalf("canonical = %q, want json", canonical)
+	}
+	if f.Name() != "json" {
+		t.Fatalf("formatter returned unexpected Name: %q", f.Name())
+	}
+}
+
+func TestResolveFormatterUnknown(t *testing.T) {
+	f, canonical := ResolveFormatter("not-real")
+	if f != nil || canonical != "" {
+		t.Fatalf("expected nil formatter and empty canonical, got %v / %q", f, canonical)
+	}
+}
+
+func TestDetermineExtension(t *testing.T) {
+	cases := map[string]string{
+		"console":      "txt",
+		"console-lite": "txt",
+		"csv":          "csv",
+		"detailed-csv": "csv",
+		"html":         "html",
+		"json":         "json",
+		"other":        "other",
+	}
+	for canonical, want := range cases {
+		if got := determineExtension(canonical); got != want {
+			t.Fatalf("determineExtension(%q) = %q, want %q", canonical, got, want)
+		}
+	}
+}
+
 func TestUnknownFormatErrorIncludesSuggestions(t *testing.T) {
 	err := GenerateReport(&domain.ScenarioComparison{}, "definitely-not-a-format")
 	if err == nil {

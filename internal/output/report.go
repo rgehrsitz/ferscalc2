@@ -14,15 +14,8 @@ type ReportGenerator struct{}
 
 // GenerateReport prefers registered formatters; falls back to legacy generators for json/csv variants.
 func GenerateReport(results *domain.ScenarioComparison, format string) error {
-	if f := GetFormatterByName(format); f != nil {
-		ext := format
-		if format == "console-lite" {
-			ext = "txt"
-		}
-		if strings.Contains(format, "csv") {
-			ext = "csv"
-		}
-		_, err := WriteFormatted(f, results, ext)
+	if f, canonical := ResolveFormatter(format); f != nil {
+		_, err := WriteFormatted(f, results, determineExtension(canonical))
 		return err
 	}
 	switch format {
@@ -49,6 +42,21 @@ func GenerateReport(results *domain.ScenarioComparison, format string) error {
 	default:
 		// enrich error with available formatters and aliases
 		return fmt.Errorf("%w: %q. Try one of: %s (aliases: %s)", ErrUnsupportedFormat, format, strings.Join(AvailableFormatterNames(), ", "), strings.Join(AvailableFormatAliases(), ", "))
+	}
+}
+
+func determineExtension(canonical string) string {
+	switch {
+	case canonical == "console", canonical == "console-lite":
+		return "txt"
+	case strings.Contains(canonical, "csv"):
+		return "csv"
+	case canonical == "html":
+		return "html"
+	case canonical == "json":
+		return "json"
+	default:
+		return canonical
 	}
 }
 

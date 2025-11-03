@@ -50,21 +50,25 @@ var builtInFormatters = []Formatter{
 	JSONFormatter{},
 }
 
+var formatterByCanonical = buildFormatterIndex()
+
 // GetFormatterByName fetches a registered formatter.
 func GetFormatterByName(name string) Formatter {
-	n := NormalizeFormatName(name)
-	for _, f := range builtInFormatters {
-		if f.Name() == name {
-			return f
-		}
+	f, _ := ResolveFormatter(name)
+	return f
+}
+
+// ResolveFormatter returns the formatter and its canonical name, if available.
+func ResolveFormatter(name string) (Formatter, string) {
+	canonical := NormalizeFormatName(name)
+	if canonical == "" {
+		return nil, ""
 	}
-	// try normalized name
-	for _, f := range builtInFormatters {
-		if f.Name() == n {
-			return f
-		}
+	f := formatterByCanonical[canonical]
+	if f == nil {
+		return nil, ""
 	}
-	return nil
+	return f, canonical
 }
 
 // aliasMap provides user-friendly synonyms for format names.
@@ -80,8 +84,11 @@ var aliasMap = map[string]string{
 // NormalizeFormatName lowers and resolves aliases.
 func NormalizeFormatName(name string) string {
 	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return ""
+	}
 	if mapped, ok := aliasMap[n]; ok {
-		return mapped
+		return strings.ToLower(mapped)
 	}
 	return n
 }
@@ -104,4 +111,12 @@ func AvailableFormatAliases() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func buildFormatterIndex() map[string]Formatter {
+	index := make(map[string]Formatter, len(builtInFormatters))
+	for _, f := range builtInFormatters {
+		index[strings.ToLower(f.Name())] = f
+	}
+	return index
 }
