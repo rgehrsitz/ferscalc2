@@ -4,8 +4,16 @@
 *.dll
 *.so
 *.dylib
-fers-calc
-rpgo
+
+# Built binaries (root-level or generated during builds)
+/fers-calc
+/rpgo
+
+# Built binaries inside cmd packages (keep source code tracked)
+cmd/**/fers-calc
+cmd/**/rpgo
+!cmd/**/fers-calc/
+!cmd/**/rpgo/
 
 # Test binary, built with `go test -c`
 *.test
