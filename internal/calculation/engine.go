@@ -96,8 +96,9 @@ func (ce *CalculationEngine) RunScenario(ctx context.Context, config *domain.Con
 	}
 
 	// Validate inflation and return rates are reasonable (allow deflation but cap extreme values)
-	if config.GlobalAssumptions.InflationRate.LessThan(decimal.NewFromFloat(-0.10)) || config.GlobalAssumptions.InflationRate.GreaterThan(decimal.NewFromFloat(0.20)) {
-		return nil, fmt.Errorf("inflation rate must be between -10%% and 20%%, got %s%%",
+	if config.GlobalAssumptions.InflationRate.LessThan(decimal.NewFromFloat(MinInflationRate)) || config.GlobalAssumptions.InflationRate.GreaterThan(decimal.NewFromFloat(MaxInflationRate)) {
+		return nil, fmt.Errorf("inflation rate must be between %.0f%% and %.0f%%, got %s%%",
+			MinInflationRate*100, MaxInflationRate*100,
 			config.GlobalAssumptions.InflationRate.Mul(decimal.NewFromInt(100)).StringFixed(2))
 	}
 
@@ -145,7 +146,7 @@ func (ce *CalculationEngine) RunScenario(ctx context.Context, config *domain.Con
 
 	// Calculate total lifetime income (present value)
 	var totalPV decimal.Decimal
-	discountRate := decimal.NewFromFloat(0.03) // 3% discount rate
+	discountRate := decimal.NewFromFloat(DefaultDiscountRate)
 	for i, year := range projection {
 		discountFactor := decimal.NewFromFloat(1).Add(discountRate).Pow(decimal.NewFromInt(int64(i)))
 		totalPV = totalPV.Add(year.NetIncome.Div(discountFactor))
@@ -215,18 +216,18 @@ func (ce *CalculationEngine) calculateDeterministicSuccessRate(projection []doma
 		lastTSP := projection[projectionLength-1].TSPBalancePersonA.Add(projection[projectionLength-1].TSPBalancePersonB)
 
 		if lastTSP.GreaterThanOrEqual(firstTSP) {
-			return decimal.NewFromFloat(100.0) // 100% success - TSP lasted and grew
+			return decimal.NewFromFloat(PerfectSuccessRate) // 100% success - TSP lasted and grew
 		} else {
-			return decimal.NewFromFloat(95.0) // 95% success - TSP lasted but declined
+			return decimal.NewFromFloat(GoodSuccessRate) // 95% success - TSP lasted but declined
 		}
 	}
 
 	// If TSP depletes before end of projection, calculate percentage based on longevity
 	successRate := decimal.NewFromInt(int64(tspLongevity)).Div(decimal.NewFromInt(int64(projectionLength))).Mul(decimal.NewFromFloat(100.0))
 
-	// Minimum 10% success rate for any scenario that makes it past year 1
-	if successRate.LessThan(decimal.NewFromFloat(10.0)) && tspLongevity > 1 {
-		return decimal.NewFromFloat(10.0)
+	// Minimum success rate for any scenario that makes it past year 1
+	if successRate.LessThan(decimal.NewFromFloat(MinSuccessRate)) && tspLongevity > 1 {
+		return decimal.NewFromFloat(MinSuccessRate)
 	}
 
 	return successRate
@@ -273,7 +274,7 @@ func (nic *NetIncomeCalculator) Calculate(personA, personB *domain.Employee, deb
 	grossIncome := personA.CurrentSalary.Add(personB.CurrentSalary)
 
 	// Calculate FEHB premiums (only Person A pays FEHB, Person B has FSA-HC)
-	fehbPremium := personA.FEHBPremiumPerPayPeriod.Mul(decimal.NewFromInt(26)) // 26 pay periods per year
+	fehbPremium := personA.FEHBPremiumPerPayPeriod.Mul(decimal.NewFromInt(BiWeeklyPayPeriods))
 
 	// Calculate TSP contributions (pre-tax)
 	tspContributions := personA.TotalAnnualTSPContribution().Add(personB.TotalAnnualTSPContribution())

@@ -457,6 +457,31 @@ func CalculateCurrentTaxableIncome(personASalary, personBSalary decimal.Decimal)
 	}
 }
 
+// TaxCalculationInput contains all inputs needed for tax calculations
+type TaxCalculationInput struct {
+	PersonA, PersonB *domain.Employee
+	Scenario         *domain.Scenario
+	Year             int
+	IsRetired        bool
+	Pensions         [2]decimal.Decimal // [PersonA, PersonB]
+	SurvivorPensions [2]decimal.Decimal // [PersonA, PersonB]
+	TSPWithdrawals   [2]decimal.Decimal // [PersonA, PersonB]
+	SocialSecurity   [2]decimal.Decimal // [PersonA, PersonB]
+	WorkingIncome    [2]decimal.Decimal // [PersonA, PersonB]
+}
+
+// TaxCalculationResult contains all tax calculation outputs
+type TaxCalculationResult struct {
+	FederalTax         decimal.Decimal
+	StateTax           decimal.Decimal
+	LocalTax           decimal.Decimal
+	FICATax            decimal.Decimal
+	TaxableIncomeTotal decimal.Decimal
+	StandardDeduction  decimal.Decimal
+	FilingStatus       string
+	Seniors            int
+}
+
 // CalculateSocialSecurityTaxation calculates the taxable portion of Social Security benefits
 func (ctc *ComprehensiveTaxCalculator) CalculateSocialSecurityTaxation(ssBenefits decimal.Decimal, otherIncome decimal.Decimal) decimal.Decimal {
 	// Calculate provisional income
@@ -467,23 +492,13 @@ func (ctc *ComprehensiveTaxCalculator) CalculateSocialSecurityTaxation(ssBenefit
 }
 
 // calculateTaxes calculates all applicable taxes
-func (ce *CalculationEngine) calculateTaxes(
-	personA, personB *domain.Employee,
-	scenario *domain.Scenario,
-	year int,
-	isRetired bool,
-	pensionPersonA, pensionPersonB,
-	survivorPensionPersonA, survivorPensionPersonB,
-	tspWithdrawalPersonA, tspWithdrawalPersonB,
-	ssPersonA, ssPersonB decimal.Decimal,
-	workingIncomePersonA, workingIncomePersonB decimal.Decimal,
-) (federal decimal.Decimal, state decimal.Decimal, local decimal.Decimal, fica decimal.Decimal, taxableIncomeTotal decimal.Decimal, stdDed decimal.Decimal, filingStatusOut string, seniorsOut int) {
-	ctx := newTaxComputationContext(personA, personB, scenario, year, isRetired,
-		pensionPersonA, pensionPersonB,
-		survivorPensionPersonA, survivorPensionPersonB,
-		tspWithdrawalPersonA, tspWithdrawalPersonB,
-		ssPersonA, ssPersonB,
-		workingIncomePersonA, workingIncomePersonB,
+func (ce *CalculationEngine) calculateTaxes(input TaxCalculationInput) TaxCalculationResult {
+	ctx := newTaxComputationContext(input.PersonA, input.PersonB, input.Scenario, input.Year, input.IsRetired,
+		input.Pensions[0], input.Pensions[1],
+		input.SurvivorPensions[0], input.SurvivorPensions[1],
+		input.TSPWithdrawals[0], input.TSPWithdrawals[1],
+		input.SocialSecurity[0], input.SocialSecurity[1],
+		input.WorkingIncome[0], input.WorkingIncome[1],
 	)
 
 	var result taxResult
@@ -496,7 +511,16 @@ func (ce *CalculationEngine) calculateTaxes(
 		result = ce.calculateWorkingYearTaxes(ctx)
 	}
 
-	return result.federal, result.state, result.local, result.fica, result.taxableTotal, result.standardDeduction, result.filingStatus, result.seniors
+	return TaxCalculationResult{
+		FederalTax:         result.federal,
+		StateTax:           result.state,
+		LocalTax:           result.local,
+		FICATax:            result.fica,
+		TaxableIncomeTotal: result.taxableTotal,
+		StandardDeduction:  result.standardDeduction,
+		FilingStatus:       result.filingStatus,
+		Seniors:            result.seniors,
+	}
 }
 
 type taxResult struct {

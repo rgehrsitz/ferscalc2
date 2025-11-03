@@ -69,9 +69,9 @@ personal_details:
     #   # Allocation data is automatically loaded from CSV files in data/tsp-returns/
 
 global_assumptions:
-  inflation_rate: "0.025"
-  fehb_premium_inflation: "0.10"
-  tsp_return_pre_retirement: "0.06"  # Conservative estimate for L 2030 funds
+  inflation_rate: "0.03"
+  fehb_premium_inflation: "0.08"
+  tsp_return_pre_retirement: "0.05"  # Conservative estimate for L 2030 funds
   tsp_return_post_retirement: "0.04"
   cola_general_rate: "0.02"
   projection_years: 30
@@ -260,16 +260,3 @@ scenarios:
       tsp_withdrawal_strategy: "variable_percentage"
       tsp_withdrawal_rate: "0.03" 
       
-  - name: "Rob Retires at 63 - Feb 2028"
-    person_a:
-      employee_name: "Rob"
-      retirement_date: "2028-02-28T00:00:00Z"
-      ss_start_age: 62
-      tsp_withdrawal_strategy: "variable_percentage"
-      tsp_withdrawal_rate: "0.03" 
-    person_b:
-      employee_name: "Dawn"
-      retirement_date: "2025-08-30T00:00:00Z"
-      ss_start_age: 62
-      tsp_withdrawal_strategy: "variable_percentage"
-      tsp_withdrawal_rate: "0.03" 

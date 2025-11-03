@@ -136,23 +136,27 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 			yearResults[1].socialSecurity,
 		)
 
-		federalTax, stateTax, localTax, ficaTax, taxableTotal, stdDedUsed, filingStatusUsed, seniors65 := ce.calculateTaxes(
-			personA,
-			personB,
-			scenario,
-			year,
-			yearResults[0].isRetired && yearResults[1].isRetired,
-			yearResults[0].pension,
-			yearResults[1].pension,
-			yearResults[0].survivorPension,
-			yearResults[1].survivorPension,
-			yearResults[0].tspWithdrawal,
-			yearResults[1].tspWithdrawal,
-			yearResults[0].socialSecurity,
-			yearResults[1].socialSecurity,
-			yearResults[0].salary,
-			yearResults[1].salary,
-		)
+		taxInput := TaxCalculationInput{
+			PersonA:          personA,
+			PersonB:          personB,
+			Scenario:         scenario,
+			Year:             year,
+			IsRetired:        yearResults[0].isRetired && yearResults[1].isRetired,
+			Pensions:         [2]decimal.Decimal{yearResults[0].pension, yearResults[1].pension},
+			SurvivorPensions: [2]decimal.Decimal{yearResults[0].survivorPension, yearResults[1].survivorPension},
+			TSPWithdrawals:   [2]decimal.Decimal{yearResults[0].tspWithdrawal, yearResults[1].tspWithdrawal},
+			SocialSecurity:   [2]decimal.Decimal{yearResults[0].socialSecurity, yearResults[1].socialSecurity},
+			WorkingIncome:    [2]decimal.Decimal{yearResults[0].salary, yearResults[1].salary},
+		}
+		taxResult := ce.calculateTaxes(taxInput)
+		federalTax := taxResult.FederalTax
+		stateTax := taxResult.StateTax
+		localTax := taxResult.LocalTax
+		ficaTax := taxResult.FICATax
+		taxableTotal := taxResult.TaxableIncomeTotal
+		stdDedUsed := taxResult.StandardDeduction
+		filingStatusUsed := taxResult.FilingStatus
+		seniors65 := taxResult.Seniors
 
 		tspContributions := decimal.Zero
 		if (!yearResults[0].isRetired || !yearResults[1].isRetired) && !(personStates[0].deceased || personStates[1].deceased) {
