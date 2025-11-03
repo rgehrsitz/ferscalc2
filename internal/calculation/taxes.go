@@ -467,162 +467,349 @@ func (ctc *ComprehensiveTaxCalculator) CalculateSocialSecurityTaxation(ssBenefit
 }
 
 // calculateTaxes calculates all applicable taxes
-func (ce *CalculationEngine) calculateTaxes(personA, personB *domain.Employee, scenario *domain.Scenario, year int, isRetired bool, pensionPersonA, pensionPersonB, survivorPensionPersonA, survivorPensionPersonB, tspWithdrawalPersonA, tspWithdrawalPersonB, ssPersonA, ssPersonB decimal.Decimal, workingIncomePersonA, workingIncomePersonB decimal.Decimal) (federal decimal.Decimal, state decimal.Decimal, local decimal.Decimal, fica decimal.Decimal, taxableIncomeTotal decimal.Decimal, stdDed decimal.Decimal, filingStatusOut string, seniorsOut int) {
-	projectionStartYear := ProjectionBaseYear
-	projectionDate := time.Date(projectionStartYear, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(year, 0, 0)
-	agePersonA := personA.Age(projectionDate)
-	agePersonB := personB.Age(projectionDate)
+func (ce *CalculationEngine) calculateTaxes(
+	personA, personB *domain.Employee,
+	scenario *domain.Scenario,
+	year int,
+	isRetired bool,
+	pensionPersonA, pensionPersonB,
+	survivorPensionPersonA, survivorPensionPersonB,
+	tspWithdrawalPersonA, tspWithdrawalPersonB,
+	ssPersonA, ssPersonB decimal.Decimal,
+	workingIncomePersonA, workingIncomePersonB decimal.Decimal,
+) (federal decimal.Decimal, state decimal.Decimal, local decimal.Decimal, fica decimal.Decimal, taxableIncomeTotal decimal.Decimal, stdDed decimal.Decimal, filingStatusOut string, seniorsOut int) {
+	ctx := newTaxComputationContext(personA, personB, scenario, year, isRetired,
+		pensionPersonA, pensionPersonB,
+		survivorPensionPersonA, survivorPensionPersonB,
+		tspWithdrawalPersonA, tspWithdrawalPersonB,
+		ssPersonA, ssPersonB,
+		workingIncomePersonA, workingIncomePersonB,
+	)
 
-	// Determine mortality & filing status for this year
+	var result taxResult
+	switch {
+	case ctx.isTransitionYear():
+		result = ce.calculateTransitionYearTaxes(ctx)
+	case ctx.isRetirementYear():
+		result = ce.calculateRetirementYearTaxes(ctx)
+	default:
+		result = ce.calculateWorkingYearTaxes(ctx)
+	}
+
+	return result.federal, result.state, result.local, result.fica, result.taxableTotal, result.standardDeduction, result.filingStatus, result.seniors
+}
+
+type taxResult struct {
+	federal           decimal.Decimal
+	state             decimal.Decimal
+	local             decimal.Decimal
+	fica              decimal.Decimal
+	taxableTotal      decimal.Decimal
+	standardDeduction decimal.Decimal
+	filingStatus      string
+	seniors           int
+}
+
+type taxComputationContext struct {
+	personA, personB *domain.Employee
+	scenario         *domain.Scenario
+	year             int
+	projectionDate   time.Time
+	filingStatus     string
+	seniors          int
+	personADeceased  bool
+	personBDeceased  bool
+	isRetired        bool
+	pensionA         decimal.Decimal
+	pensionB         decimal.Decimal
+	survivorPensionA decimal.Decimal
+	survivorPensionB decimal.Decimal
+	tspWithdrawalA   decimal.Decimal
+	tspWithdrawalB   decimal.Decimal
+	socialSecurityA  decimal.Decimal
+	socialSecurityB  decimal.Decimal
+	workingIncomeA   decimal.Decimal
+	workingIncomeB   decimal.Decimal
+	currentSalaryA   decimal.Decimal
+	currentSalaryB   decimal.Decimal
+}
+
+func newTaxComputationContext(
+	personA, personB *domain.Employee,
+	scenario *domain.Scenario,
+	year int,
+	isRetired bool,
+	pensionA, pensionB,
+	survivorPensionA, survivorPensionB,
+	tspWithdrawalA, tspWithdrawalB,
+	socialSecurityA, socialSecurityB decimal.Decimal,
+	workingIncomeA, workingIncomeB decimal.Decimal,
+) taxComputationContext {
+	projectionDate := time.Date(ProjectionBaseYear, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(year, 0, 0)
+	ageA := personA.Age(projectionDate)
+	ageB := personB.Age(projectionDate)
+
+	filingStatus, seniors, personADeceased, personBDeceased := determineFilingStatusAndSeniors(scenario, personA, personB, year, ageA, ageB)
+
+	return taxComputationContext{
+		personA:          personA,
+		personB:          personB,
+		scenario:         scenario,
+		year:             year,
+		projectionDate:   projectionDate,
+		filingStatus:     filingStatus,
+		seniors:          seniors,
+		personADeceased:  personADeceased,
+		personBDeceased:  personBDeceased,
+		isRetired:        isRetired,
+		pensionA:         pensionA,
+		pensionB:         pensionB,
+		survivorPensionA: survivorPensionA,
+		survivorPensionB: survivorPensionB,
+		tspWithdrawalA:   tspWithdrawalA,
+		tspWithdrawalB:   tspWithdrawalB,
+		socialSecurityA:  socialSecurityA,
+		socialSecurityB:  socialSecurityB,
+		workingIncomeA:   workingIncomeA,
+		workingIncomeB:   workingIncomeB,
+		currentSalaryA:   personA.CurrentSalary,
+		currentSalaryB:   personB.CurrentSalary,
+	}
+}
+
+func determineFilingStatusAndSeniors(scenario *domain.Scenario, personA, personB *domain.Employee, year, ageA, ageB int) (string, int, bool, bool) {
 	filingStatus := "mfj"
 	seniors := 0
-	if agePersonA >= 65 {
+	if ageA >= 65 {
 		seniors++
 	}
-	if agePersonB >= 65 {
+	if ageB >= 65 {
 		seniors++
 	}
 
-	// Use shared helper for death year indexes (projection horizon not needed here; pass year+1 as conservative bound)
-	personADeathYearIndex, personBDeathYearIndex := deriveDeathYearIndexes(scenario, personA, personB, year+1+5) // simple upper bound
-	personADeceased := personADeathYearIndex != nil && year >= *personADeathYearIndex
-	personBDeceased := personBDeathYearIndex != nil && year >= *personBDeathYearIndex
+	const mortalityBufferYears = 5
+	personADeathIndex, personBDeathIndex := deriveDeathYearIndexes(scenario, personA, personB, year+1+mortalityBufferYears)
+	personADeceased := personADeathIndex != nil && year >= *personADeathIndex
+	personBDeceased := personBDeathIndex != nil && year >= *personBDeathIndex
+
 	if (personADeceased || personBDeceased) && !(personADeceased && personBDeceased) {
-		// One survivor; evaluate filing status switch policy
 		if scenario != nil && scenario.Mortality != nil && scenario.Mortality.Assumptions != nil {
-			mode := scenario.Mortality.Assumptions.FilingStatusSwitch
-			switch mode {
+			switch scenario.Mortality.Assumptions.FilingStatusSwitch {
 			case "immediate":
 				filingStatus = "single"
-				seniors = 0
-				// Count surviving senior for additional deduction
-				if !personADeceased && agePersonA >= 65 {
-					seniors = 1
-				}
-				if !personBDeceased && agePersonB >= 65 {
-					seniors = 1
-				}
+				seniors = survivingSeniorCount(personADeceased, personBDeceased, ageA, ageB)
 			case "next_year":
-				// Switch next year after death event
 				deathYear := 0
-				if personADeceased && personADeathYearIndex != nil {
-					deathYear = *personADeathYearIndex
+				if personADeceased && personADeathIndex != nil {
+					deathYear = *personADeathIndex
 				}
-				if personBDeceased && personBDeathYearIndex != nil {
-					deathYear = *personBDeathYearIndex
+				if personBDeceased && personBDeathIndex != nil {
+					deathYear = *personBDeathIndex
 				}
 				if year > deathYear {
 					filingStatus = "single"
-					seniors = 0
-					if !personADeceased && agePersonA >= 65 {
-						seniors = 1
-					}
-					if !personBDeceased && agePersonB >= 65 {
-						seniors = 1
-					}
+					seniors = survivingSeniorCount(personADeceased, personBDeceased, ageA, ageB)
 				}
 			}
 		}
 	}
 
-	// Check if this is a transition year (has both working and retirement income)
-	isTransitionYear := (workingIncomePersonA.GreaterThan(decimal.Zero) || workingIncomePersonB.GreaterThan(decimal.Zero)) &&
-		(pensionPersonA.GreaterThan(decimal.Zero) || pensionPersonB.GreaterThan(decimal.Zero) || tspWithdrawalPersonA.GreaterThan(decimal.Zero) || tspWithdrawalPersonB.GreaterThan(decimal.Zero) || ssPersonA.GreaterThan(decimal.Zero) || ssPersonB.GreaterThan(decimal.Zero))
+	return filingStatus, seniors, personADeceased, personBDeceased
+}
 
-	if isTransitionYear {
-		// Transition year: combine working and retirement income, include survivor pensions
-		totalWorkingIncome := workingIncomePersonA.Add(workingIncomePersonB)
-		totalRetirementIncome := pensionPersonA.Add(pensionPersonB).Add(survivorPensionPersonA).Add(survivorPensionPersonB).Add(tspWithdrawalPersonA).Add(tspWithdrawalPersonB)
-
-		// Calculate Social Security taxation (filing status aware thresholds)
-		totalSSBenefits := ssPersonA.Add(ssPersonB)
-		provisional := ce.TaxCalc.SSTaxCalc.CalculateProvisionalIncome(totalRetirementIncome, decimal.Zero, totalSSBenefits)
-		var taxableSS decimal.Decimal
-		if filingStatus == "single" {
-			taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecuritySingle(totalSSBenefits, provisional)
-		} else {
-			taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecurity(totalSSBenefits, provisional)
-		}
-
-		// Create taxable income structure for transition year
-		taxableIncome := domain.TaxableIncome{
-			Salary:             totalWorkingIncome,
-			FERSPension:        pensionPersonA.Add(pensionPersonB).Add(survivorPensionPersonA).Add(survivorPensionPersonB),
-			TSPWithdrawalsTrad: tspWithdrawalPersonA.Add(tspWithdrawalPersonB),
-			TaxableSSBenefits:  taxableSS,
-			OtherTaxableIncome: decimal.Zero,
-			WageIncome:         totalWorkingIncome,
-			InterestIncome:     decimal.Zero,
-		}
-
-		// Calculate taxes for transition year (FICA only on working income, with proration)
-		// Federal tax using filing status logic
-		federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, filingStatus, seniors)
-		stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, false)
-		localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(totalWorkingIncome, false)
-		personAFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(workingIncomePersonA, totalWorkingIncome)
-		personBFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(workingIncomePersonB, totalWorkingIncome)
-		ficaTax := personAFICA.Add(personBFICA)
-		std := ce.TaxCalc.FederalTaxCalc.StandardDeduction
-		if filingStatus == "single" {
-			std = ce.TaxCalc.FederalTaxCalc.StandardDeductionSingle
-		}
-		for i := 0; i < seniors; i++ {
-			std = std.Add(ce.TaxCalc.FederalTaxCalc.AdditionalStdDed)
-		}
-		return federalTax, stateTax, localTax, ficaTax, taxableIncome.Salary.Add(taxableIncome.FERSPension).Add(taxableIncome.TSPWithdrawalsTrad).Add(taxableIncome.TaxableSSBenefits), std, filingStatus, seniors
-	} else if isRetired {
-		// Fully retired year
-		// Calculate other income (excluding Social Security)
-		otherIncome := pensionPersonA.Add(pensionPersonB).Add(survivorPensionPersonA).Add(survivorPensionPersonB).Add(tspWithdrawalPersonA).Add(tspWithdrawalPersonB)
-
-		// Calculate Social Security taxation with filing status thresholds
-		totalSSBenefits := ssPersonA.Add(ssPersonB)
-		provisional := ce.TaxCalc.SSTaxCalc.CalculateProvisionalIncome(otherIncome, decimal.Zero, totalSSBenefits)
-		var taxableSS decimal.Decimal
-		if filingStatus == "single" {
-			taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecuritySingle(totalSSBenefits, provisional)
-		} else {
-			taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecurity(totalSSBenefits, provisional)
-		}
-
-		// Create taxable income structure
-		taxableIncome := domain.TaxableIncome{
-			Salary:             decimal.Zero, // No salary in retirement
-			FERSPension:        pensionPersonA.Add(pensionPersonB).Add(survivorPensionPersonA).Add(survivorPensionPersonB),
-			TSPWithdrawalsTrad: tspWithdrawalPersonA.Add(tspWithdrawalPersonB), // Assuming all TSP withdrawals are from traditional
-			TaxableSSBenefits:  taxableSS,
-			OtherTaxableIncome: decimal.Zero,
-			WageIncome:         decimal.Zero,
-			InterestIncome:     decimal.Zero,
-		}
-
-		// Calculate taxes (no FICA in retirement)
-		federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, filingStatus, seniors)
-		stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, true)
-		localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(decimal.Zero, true)
-		std := ce.TaxCalc.FederalTaxCalc.StandardDeduction
-		if filingStatus == "single" {
-			std = ce.TaxCalc.FederalTaxCalc.StandardDeductionSingle
-		}
-		for i := 0; i < seniors; i++ {
-			std = std.Add(ce.TaxCalc.FederalTaxCalc.AdditionalStdDed)
-		}
-		return federalTax, stateTax, localTax, decimal.Zero, taxableIncome.Salary.Add(taxableIncome.FERSPension).Add(taxableIncome.TSPWithdrawalsTrad).Add(taxableIncome.TaxableSSBenefits), std, filingStatus, seniors
-	} else {
-		// Pre-retirement: calculate current working income
-		currentTaxableIncome := CalculateCurrentTaxableIncome(personA.CurrentSalary, personB.CurrentSalary)
-		federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(currentTaxableIncome, filingStatus, seniors)
-		stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(currentTaxableIncome, false)
-		localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(personA.CurrentSalary.Add(personB.CurrentSalary), false)
-		ficaTax := ce.TaxCalc.FICATaxCalc.CalculateFICA(personA.CurrentSalary, personA.CurrentSalary.Add(personB.CurrentSalary)).Add(ce.TaxCalc.FICATaxCalc.CalculateFICA(personB.CurrentSalary, personA.CurrentSalary.Add(personB.CurrentSalary)))
-		std := ce.TaxCalc.FederalTaxCalc.StandardDeduction
-		if filingStatus == "single" {
-			std = ce.TaxCalc.FederalTaxCalc.StandardDeductionSingle
-		}
-		for i := 0; i < seniors; i++ {
-			std = std.Add(ce.TaxCalc.FederalTaxCalc.AdditionalStdDed)
-		}
-		return federalTax, stateTax, localTax, ficaTax, currentTaxableIncome.Salary, std, filingStatus, seniors
+func survivingSeniorCount(personADeceased, personBDeceased bool, ageA, ageB int) int {
+	if personADeceased && personBDeceased {
+		return 0
 	}
+
+	if !personADeceased && ageA >= 65 {
+		return 1
+	}
+	if !personBDeceased && ageB >= 65 {
+		return 1
+	}
+	return 0
+}
+
+func (ctx taxComputationContext) totalWorkingIncome() decimal.Decimal {
+	return ctx.workingIncomeA.Add(ctx.workingIncomeB)
+}
+
+func (ctx taxComputationContext) totalRetirementIncome() decimal.Decimal {
+	return ctx.pensionA.
+		Add(ctx.pensionB).
+		Add(ctx.survivorPensionA).
+		Add(ctx.survivorPensionB).
+		Add(ctx.tspWithdrawalA).
+		Add(ctx.tspWithdrawalB)
+}
+
+func (ctx taxComputationContext) totalPensionWithSurvivor() decimal.Decimal {
+	return ctx.pensionA.Add(ctx.pensionB).Add(ctx.survivorPensionA).Add(ctx.survivorPensionB)
+}
+
+func (ctx taxComputationContext) totalSocialSecurity() decimal.Decimal {
+	return ctx.socialSecurityA.Add(ctx.socialSecurityB)
+}
+
+func (ctx taxComputationContext) totalTSPWithdrawals() decimal.Decimal {
+	return ctx.tspWithdrawalA.Add(ctx.tspWithdrawalB)
+}
+
+func (ctx taxComputationContext) combinedCurrentSalary() decimal.Decimal {
+	return ctx.currentSalaryA.Add(ctx.currentSalaryB)
+}
+
+func (ctx taxComputationContext) hasWorkingIncome() bool {
+	return ctx.workingIncomeA.GreaterThan(decimal.Zero) || ctx.workingIncomeB.GreaterThan(decimal.Zero)
+}
+
+func (ctx taxComputationContext) hasRetirementIncome() bool {
+	return ctx.pensionA.GreaterThan(decimal.Zero) ||
+		ctx.pensionB.GreaterThan(decimal.Zero) ||
+		ctx.survivorPensionA.GreaterThan(decimal.Zero) ||
+		ctx.survivorPensionB.GreaterThan(decimal.Zero) ||
+		ctx.tspWithdrawalA.GreaterThan(decimal.Zero) ||
+		ctx.tspWithdrawalB.GreaterThan(decimal.Zero) ||
+		ctx.socialSecurityA.GreaterThan(decimal.Zero) ||
+		ctx.socialSecurityB.GreaterThan(decimal.Zero)
+}
+
+func (ctx taxComputationContext) isTransitionYear() bool {
+	return ctx.hasWorkingIncome() && ctx.hasRetirementIncome()
+}
+
+func (ctx taxComputationContext) isRetirementYear() bool {
+	return ctx.isRetired
+}
+
+func (ce *CalculationEngine) calculateTransitionYearTaxes(ctx taxComputationContext) taxResult {
+	totalWorkingIncome := ctx.totalWorkingIncome()
+	totalRetirementIncome := ctx.totalRetirementIncome()
+	totalSS := ctx.totalSocialSecurity()
+
+	provisional := ce.TaxCalc.SSTaxCalc.CalculateProvisionalIncome(totalRetirementIncome, decimal.Zero, totalSS)
+
+	var taxableSS decimal.Decimal
+	if ctx.filingStatus == "single" {
+		taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecuritySingle(totalSS, provisional)
+	} else {
+		taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecurity(totalSS, provisional)
+	}
+
+	taxableIncome := domain.TaxableIncome{
+		Salary:             totalWorkingIncome,
+		FERSPension:        ctx.totalPensionWithSurvivor(),
+		TSPWithdrawalsTrad: ctx.totalTSPWithdrawals(),
+		TaxableSSBenefits:  taxableSS,
+		OtherTaxableIncome: decimal.Zero,
+		WageIncome:         totalWorkingIncome,
+		InterestIncome:     decimal.Zero,
+	}
+
+	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors)
+	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, false)
+	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(totalWorkingIncome, false)
+	personAFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.workingIncomeA, totalWorkingIncome)
+	personBFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.workingIncomeB, totalWorkingIncome)
+	ficaTax := personAFICA.Add(personBFICA)
+	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
+
+	taxableTotal := taxableIncome.Salary.
+		Add(taxableIncome.FERSPension).
+		Add(taxableIncome.TSPWithdrawalsTrad).
+		Add(taxableIncome.TaxableSSBenefits)
+
+	return taxResult{
+		federal:           federalTax,
+		state:             stateTax,
+		local:             localTax,
+		fica:              ficaTax,
+		taxableTotal:      taxableTotal,
+		standardDeduction: standardDeduction,
+		filingStatus:      ctx.filingStatus,
+		seniors:           ctx.seniors,
+	}
+}
+
+func (ce *CalculationEngine) calculateRetirementYearTaxes(ctx taxComputationContext) taxResult {
+	otherIncome := ctx.totalRetirementIncome()
+	totalSS := ctx.totalSocialSecurity()
+
+	provisional := ce.TaxCalc.SSTaxCalc.CalculateProvisionalIncome(otherIncome, decimal.Zero, totalSS)
+
+	var taxableSS decimal.Decimal
+	if ctx.filingStatus == "single" {
+		taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecuritySingle(totalSS, provisional)
+	} else {
+		taxableSS = ce.TaxCalc.SSTaxCalc.CalculateTaxableSocialSecurity(totalSS, provisional)
+	}
+
+	taxableIncome := domain.TaxableIncome{
+		Salary:             decimal.Zero,
+		FERSPension:        ctx.totalPensionWithSurvivor(),
+		TSPWithdrawalsTrad: ctx.totalTSPWithdrawals(),
+		TaxableSSBenefits:  taxableSS,
+		OtherTaxableIncome: decimal.Zero,
+		WageIncome:         decimal.Zero,
+		InterestIncome:     decimal.Zero,
+	}
+
+	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors)
+	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, true)
+	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(decimal.Zero, true)
+	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
+
+	taxableTotal := taxableIncome.Salary.
+		Add(taxableIncome.FERSPension).
+		Add(taxableIncome.TSPWithdrawalsTrad).
+		Add(taxableIncome.TaxableSSBenefits)
+
+	return taxResult{
+		federal:           federalTax,
+		state:             stateTax,
+		local:             localTax,
+		fica:              decimal.Zero,
+		taxableTotal:      taxableTotal,
+		standardDeduction: standardDeduction,
+		filingStatus:      ctx.filingStatus,
+		seniors:           ctx.seniors,
+	}
+}
+
+func (ce *CalculationEngine) calculateWorkingYearTaxes(ctx taxComputationContext) taxResult {
+	currentTaxableIncome := CalculateCurrentTaxableIncome(ctx.currentSalaryA, ctx.currentSalaryB)
+
+	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(currentTaxableIncome, ctx.filingStatus, ctx.seniors)
+	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(currentTaxableIncome, false)
+	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(ctx.combinedCurrentSalary(), false)
+
+	totalCurrentSalary := ctx.currentSalaryA.Add(ctx.currentSalaryB)
+	personAFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.currentSalaryA, totalCurrentSalary)
+	personBFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.currentSalaryB, totalCurrentSalary)
+	ficaTax := personAFICA.Add(personBFICA)
+
+	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
+
+	return taxResult{
+		federal:           federalTax,
+		state:             stateTax,
+		local:             localTax,
+		fica:              ficaTax,
+		taxableTotal:      currentTaxableIncome.Salary,
+		standardDeduction: standardDeduction,
+		filingStatus:      ctx.filingStatus,
+		seniors:           ctx.seniors,
+	}
+}
+
+func (ce *CalculationEngine) standardDeductionFor(filingStatus string, seniors int) decimal.Decimal {
+	standardDeduction := ce.TaxCalc.FederalTaxCalc.StandardDeduction
+	if filingStatus == "single" {
+		standardDeduction = ce.TaxCalc.FederalTaxCalc.StandardDeductionSingle
+	}
+	for i := 0; i < seniors; i++ {
+		standardDeduction = standardDeduction.Add(ce.TaxCalc.FederalTaxCalc.AdditionalStdDed)
+	}
+	return standardDeduction
 }

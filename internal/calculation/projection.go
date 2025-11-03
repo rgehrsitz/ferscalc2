@@ -8,570 +8,174 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+type ssRetirementProration int
+
+const (
+	ssProrationFractional ssRetirementProration = iota
+	ssProrationMonthlyAfterRetirement
+)
+
+type personProjectionState struct {
+	employee       *domain.Employee
+	scenario       *domain.RetirementScenario
+	strategy       TSPWithdrawalStrategy
+	traditional    decimal.Decimal
+	roth           decimal.Decimal
+	retirementYear int
+	deathYearIndex *int
+	mortalitySpec  *domain.MortalitySpec
+	deceased       bool
+	label          string
+	ssProration    ssRetirementProration
+}
+
+type personAnnualResult struct {
+	ageStart        int
+	ageEnd          int
+	isRetired       bool
+	workFraction    decimal.Decimal
+	salary          decimal.Decimal
+	pension         decimal.Decimal
+	survivorPension decimal.Decimal
+	socialSecurity  decimal.Decimal
+	supplement      decimal.Decimal
+	rmd             decimal.Decimal
+	tspWithdrawal   decimal.Decimal
+}
+
 // GenerateAnnualProjection generates annual cash flow projections for a scenario
 func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.Employee, scenario *domain.Scenario, assumptions *domain.GlobalAssumptions, federalRules domain.FederalRules) []domain.AnnualCashFlow {
 	projection := make([]domain.AnnualCashFlow, assumptions.ProjectionYears)
 
-	// Determine retirement year (0-based index)
-	// Projection starts at ProjectionBaseYear (first year of projection)
 	projectionStartYear := ProjectionBaseYear
-	retirementYear := scenario.PersonA.RetirementDate.Year() - projectionStartYear
-	if retirementYear < 0 {
-		retirementYear = 0
-	}
 
-	// Initialize TSP balances
-	currentTSPTraditionalPersonA := personA.TSPBalanceTraditional
-	currentTSPRothPersonA := personA.TSPBalanceRoth
-	currentTSPTraditionalPersonB := personB.TSPBalanceTraditional
-	currentTSPRothPersonB := personB.TSPBalanceRoth
-
-	// Create TSP withdrawal strategies
-	// For Scenario 2, we need to account for extra growth before withdrawals start
-	personAStrategy := ce.createTSPStrategy(&scenario.PersonA, currentTSPTraditionalPersonA.Add(currentTSPRothPersonA), assumptions.InflationRate)
-	personBStrategy := ce.createTSPStrategy(&scenario.PersonB, currentTSPTraditionalPersonB.Add(currentTSPRothPersonB), assumptions.InflationRate)
-
-	// Mortality derived dates using helper
 	personADeathYearIndex, personBDeathYearIndex := deriveDeathYearIndexes(scenario, personA, personB, assumptions.ProjectionYears)
+
+	personAStrategy := ce.createTSPStrategy(&scenario.PersonA, personA.TSPBalanceTraditional.Add(personA.TSPBalanceRoth), assumptions.InflationRate)
+	personBStrategy := ce.createTSPStrategy(&scenario.PersonB, personB.TSPBalanceTraditional.Add(personB.TSPBalanceRoth), assumptions.InflationRate)
+
+	personStates := []personProjectionState{
+		newPersonProjectionState(personA, &scenario.PersonA, personAStrategy, personADeathYearIndex, scenarioMortalitySpec(scenario, true), "PersonA", ssProrationFractional),
+		newPersonProjectionState(personB, &scenario.PersonB, personBStrategy, personBDeathYearIndex, scenarioMortalitySpec(scenario, false), "PersonB", ssProrationMonthlyAfterRetirement),
+	}
 
 	survivorSpendingFactor := decimal.NewFromFloat(1.0)
 	if scenario.Mortality != nil && scenario.Mortality.Assumptions != nil && !scenario.Mortality.Assumptions.SurvivorSpendingFactor.IsZero() {
 		survivorSpendingFactor = scenario.Mortality.Assumptions.SurvivorSpendingFactor
 	}
 
-	personADeceased := false
-	personBDeceased := false
-
 	for year := 0; year < assumptions.ProjectionYears; year++ {
 		projectionDate := time.Date(projectionStartYear, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(year, 0, 0)
-		agePersonA := personA.Age(projectionDate)
-		agePersonB := personB.Age(projectionDate)
-
-		// Calculate partial year retirement for each person
-		// Projection starts at ProjectionBaseYear, so year 0 = ProjectionBaseYear, etc.
-		projectionStartYear := ProjectionBaseYear
-		personARetirementYear := scenario.PersonA.RetirementDate.Year() - projectionStartYear
-		personBRetirementYear := scenario.PersonB.RetirementDate.Year() - projectionStartYear
-
-		// Determine if each person is retired for this year
-		isPersonARetired := year >= personARetirementYear
-		isPersonBRetired := year >= personBRetirementYear
-
-		// Calculate partial year factors (what portion of the year each person works)
-		var personAWorkFraction, personBWorkFraction decimal.Decimal
-
-		if year == personARetirementYear && personARetirementYear >= 0 {
-			// PersonA retires during this year - calculate work fraction
-			personARetirementDate := scenario.PersonA.RetirementDate
-			yearStart := time.Date(projectionDate.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
-			daysWorked := personARetirementDate.Sub(yearStart).Hours() / 24
-			daysInYear := 365.0
-			personAWorkFraction = decimal.NewFromFloat(daysWorked / daysInYear)
-		} else if isPersonARetired {
-			personAWorkFraction = decimal.Zero
-		} else {
-			personAWorkFraction = decimal.NewFromInt(1)
-		}
-
-		if year == personBRetirementYear && personBRetirementYear >= 0 {
-			// PersonB retires during this year - calculate work fraction
-			personBRetirementDate := scenario.PersonB.RetirementDate
-			yearStart := time.Date(projectionDate.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
-			daysWorked := personBRetirementDate.Sub(yearStart).Hours() / 24
-			daysInYear := 365.0
-			personBWorkFraction = decimal.NewFromFloat(daysWorked / daysInYear)
-		} else if isPersonBRetired {
-			personBWorkFraction = decimal.Zero
-		} else {
-			personBWorkFraction = decimal.NewFromInt(1)
-		}
-
-		// Apply death events at start-of-year (Phase 1: incomes stop this year)
-		if personADeathYearIndex != nil && year >= *personADeathYearIndex {
-			personADeceased = true
-		}
-		if personBDeathYearIndex != nil && year >= *personBDeathYearIndex {
-			personBDeceased = true
-		}
-
-		// If a spouse just became deceased this year and transfer mode is merge, merge TSP balances into survivor (traditional+roth)
-		if scenario.Mortality != nil && scenario.Mortality.Assumptions != nil && scenario.Mortality.Assumptions.TSPSpousalTransfer == "merge" {
-			if personADeceased && !personBDeceased {
-				// Move PersonA balances into PersonB's (simple add)
-				currentTSPTraditionalPersonB = currentTSPTraditionalPersonB.Add(currentTSPTraditionalPersonA)
-				currentTSPRothPersonB = currentTSPRothPersonB.Add(currentTSPRothPersonA)
-				currentTSPTraditionalPersonA = decimal.Zero
-				currentTSPRothPersonA = decimal.Zero
-			}
-			if personBDeceased && !personADeceased {
-				currentTSPTraditionalPersonA = currentTSPTraditionalPersonA.Add(currentTSPTraditionalPersonB)
-				currentTSPRothPersonA = currentTSPRothPersonA.Add(currentTSPRothPersonB)
-				currentTSPTraditionalPersonB = decimal.Zero
-				currentTSPRothPersonB = decimal.Zero
-			}
-		}
-
-		// Calculate FERS pensions (only for retired portion of year, and not after death)
-		var pensionPersonA, pensionPersonB decimal.Decimal
-		var survivorPensionPersonA, survivorPensionPersonB decimal.Decimal
-		if isPersonARetired && !personADeceased {
-			pensionPersonA = CalculatePensionForYear(personA, scenario.PersonA.RetirementDate, year-personARetirementYear, assumptions.COLAGeneralRate)
-			// Adjust for partial year if retiring this year
-			if year == personARetirementYear {
-				pensionPersonA = pensionPersonA.Mul(decimal.NewFromInt(1).Sub(personAWorkFraction))
-			}
-
-			// Debug output for pension calculation
-			if ce.Debug && year == personARetirementYear {
-				ce.Logger.Debugf("DEBUG: PersonA pension calculation for year %d", ProjectionBaseYear+year)
-				ce.Logger.Debugf("  Retirement date: %s", scenario.PersonA.RetirementDate.Format("2006-01-02"))
-				ce.Logger.Debugf("  Age at retirement: %d", personA.Age(scenario.PersonA.RetirementDate))
-				ce.Logger.Debugf("  Years of service: %s", personA.YearsOfService(scenario.PersonA.RetirementDate).StringFixed(2))
-				ce.Logger.Debugf("  High-3 salary: %s", personA.High3Salary.StringFixed(2))
-
-				// Get detailed pension calculation
-				pensionCalc := CalculateFERSPension(personA, scenario.PersonA.RetirementDate)
-				ce.Logger.Debugf("  Multiplier: %s", pensionCalc.Multiplier.StringFixed(4))
-				ce.Logger.Debugf("  ANNUAL pension (before reduction): $%s", pensionCalc.AnnualPension.StringFixed(2))
-				ce.Logger.Debugf("  Survivor election: %s", pensionCalc.SurvivorElection.StringFixed(4))
-				ce.Logger.Debugf("  ANNUAL pension (final): $%s", pensionCalc.ReducedPension.StringFixed(2))
-				ce.Logger.Debugf("  MONTHLY pension amount: $%s", pensionCalc.ReducedPension.Div(decimal.NewFromInt(12)).StringFixed(2))
-				ce.Logger.Debugf("  Current-year cash received (partial): $%s", pensionPersonA.StringFixed(2))
-			}
-		}
-		if isPersonBRetired && !personBDeceased {
-			pensionPersonB = CalculatePensionForYear(personB, scenario.PersonB.RetirementDate, year-personBRetirementYear, assumptions.COLAGeneralRate)
-			// Adjust for partial year if retiring this year
-			if year == personBRetirementYear {
-				pensionPersonB = pensionPersonB.Mul(decimal.NewFromInt(1).Sub(personBWorkFraction))
-			}
-		}
-
-		// Survivor pension logic with pro-rating in death year
-		if scenario.Mortality != nil {
-			if personADeceased && !personBDeceased && isPersonARetired {
-				baseCalc := CalculateFERSPension(personA, scenario.PersonA.RetirementDate)
-				yearsSinceRet := year - personARetirementYear
-				if yearsSinceRet < 0 {
-					yearsSinceRet = 0
-				}
-				currentSurvivor := baseCalc.SurvivorAnnuity
-				for cy := 1; cy <= yearsSinceRet; cy++ {
-					projDate := scenario.PersonA.RetirementDate.AddDate(cy, 0, 0)
-					ageAt := personA.Age(projDate)
-					currentSurvivor = ApplyFERSPensionCOLA(currentSurvivor, assumptions.COLAGeneralRate, ageAt)
-				}
-				if personADeathYearIndex != nil && year >= *personADeathYearIndex {
-					// Pro-rate in death year: survivor receives only portion AFTER death
-					var deathDate *time.Time
-					if scenario.Mortality.PersonA != nil {
-						deathDate = scenario.Mortality.PersonA.DeathDate
-					}
-					frac, occurred := deathFractionInYear(personADeathYearIndex, year, deathDate)
-					if occurred {
-						// Pension stream for deceased stops at death; survivor annuity starts month after death -> approximate with (1-frac)
-						survivorPensionPersonB = currentSurvivor.Mul(decimal.NewFromInt(1).Sub(frac))
-					} else {
-						survivorPensionPersonB = currentSurvivor
-					}
-				}
-			}
-			if personBDeceased && !personADeceased && isPersonBRetired {
-				baseCalc := CalculateFERSPension(personB, scenario.PersonB.RetirementDate)
-				yearsSinceRet := year - personBRetirementYear
-				if yearsSinceRet < 0 {
-					yearsSinceRet = 0
-				}
-				currentSurvivor := baseCalc.SurvivorAnnuity
-				for cy := 1; cy <= yearsSinceRet; cy++ {
-					projDate := scenario.PersonB.RetirementDate.AddDate(cy, 0, 0)
-					ageAt := personB.Age(projDate)
-					currentSurvivor = ApplyFERSPensionCOLA(currentSurvivor, assumptions.COLAGeneralRate, ageAt)
-				}
-				if personBDeathYearIndex != nil && year >= *personBDeathYearIndex {
-					var deathDate *time.Time
-					if scenario.Mortality.PersonB != nil {
-						deathDate = scenario.Mortality.PersonB.DeathDate
-					}
-					frac, occurred := deathFractionInYear(personBDeathYearIndex, year, deathDate)
-					if occurred {
-						survivorPensionPersonA = currentSurvivor.Mul(decimal.NewFromInt(1).Sub(frac))
-					} else {
-						survivorPensionPersonA = currentSurvivor
-					}
-				}
-			}
-		}
-
-		// Calculate Social Security benefits
-		// Note: SS benefits only start when both age-eligible AND retired
-		ssPersonA := decimal.Zero
-		if !personADeceased && isPersonARetired {
-			ssPersonA = CalculateSSBenefitForYear(personA, scenario.PersonA.SSStartAge, year, assumptions.COLAGeneralRate)
-		}
-		ssPersonB := decimal.Zero
-		if !personBDeceased && isPersonBRetired {
-			ssPersonB = CalculateSSBenefitForYear(personB, scenario.PersonB.SSStartAge, year, assumptions.COLAGeneralRate)
-		}
-
-		// Prorate Social Security if the person reaches their SS start age during this calendar year
 		yearEnd := time.Date(projectionDate.Year(), 12, 31, 23, 59, 59, 0, time.UTC)
-		// PersonA
-		agePersonAStart := agePersonA
-		agePersonAEnd := personA.Age(yearEnd)
-		if agePersonAStart < scenario.PersonA.SSStartAge && agePersonAEnd >= scenario.PersonA.SSStartAge {
-			// birthday occurs this year; prorate SS for months/days after birthday
-			birthdayThisYear := time.Date(projectionDate.Year(), personA.BirthDate.Month(), personA.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
-			// If the person also retires earlier this same year (before their birthday),
-			// defer prorating to the retirement-based logic. Otherwise use the birthday-based prorate.
-			if !(year == personARetirementYear && scenario.PersonA.RetirementDate.Before(birthdayThisYear)) {
-				daysAfter := yearEnd.Sub(birthdayThisYear).Hours() / 24.0
-				daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
-				frac := daysAfter / daysInYear
-				if frac < 0 {
-					frac = 0
+
+		yearResults := make([]personAnnualResult, len(personStates))
+
+		for idx := range personStates {
+			state := &personStates[idx]
+			if state.deathYearIndex != nil && year >= *state.deathYearIndex {
+				state.deceased = true
+			}
+
+			result := &yearResults[idx]
+			result.ageStart = state.employee.Age(projectionDate)
+			result.ageEnd = state.employee.Age(yearEnd)
+			result.isRetired = year >= state.retirementYear
+			result.workFraction = calculateWorkFraction(year, state.retirementYear, state.scenario.RetirementDate, projectionDate, result.isRetired)
+			result.salary = state.employee.CurrentSalary.Mul(result.workFraction)
+		}
+
+		if shouldMergeTSP(scenario) {
+			applyTSPSpousalTransfer(&personStates[0], &personStates[1])
+		}
+
+		for idx := range personStates {
+			state := &personStates[idx]
+			result := &yearResults[idx]
+
+			if result.isRetired && !state.deceased {
+				result.pension = calculatePensionForYear(state, year, assumptions.COLAGeneralRate, result.workFraction)
+				if ce.Debug && state.label == "PersonA" && year == state.retirementYear {
+					ce.logPensionDebug(state, year, result.pension)
 				}
-				ssPersonA = ssPersonA.Mul(decimal.NewFromFloat(frac))
+				result.supplement = calculateSupplementForYear(state, year, assumptions.InflationRate, result.workFraction)
 			}
-		}
-		// PersonB
-		agePersonBStart := agePersonB
-		agePersonBEnd := personB.Age(yearEnd)
-		if agePersonBStart < scenario.PersonB.SSStartAge && agePersonBEnd >= scenario.PersonB.SSStartAge {
-			birthdayThisYear := time.Date(projectionDate.Year(), personB.BirthDate.Month(), personB.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
-			// If the person also retires earlier this same year (before their birthday),
-			// defer prorating to the retirement-based logic. Otherwise use the birthday-based prorate.
-			if !(year == personBRetirementYear && scenario.PersonB.RetirementDate.Before(birthdayThisYear)) {
-				daysAfter := yearEnd.Sub(birthdayThisYear).Hours() / 24.0
-				daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
-				frac := daysAfter / daysInYear
-				if frac < 0 {
-					frac = 0
-				}
-				ssPersonB = ssPersonB.Mul(decimal.NewFromFloat(frac))
-			}
-		}
-		// Survivor SS refined: compute survivor benefit factoring early-claim reduction
-		if personADeceased && !personBDeceased {
-			fra := dateutil.FullRetirementAge(personB.BirthDate)
-			// Use deceased's current-year benefit (pre-death). If zero (due to modeling order), recalc directly.
-			deceasedBenefit := CalculateSSBenefitForYear(personA, scenario.PersonA.SSStartAge, year, assumptions.COLAGeneralRate)
-			candidate := CalculateSurvivorSSBenefit(deceasedBenefit, agePersonB, fra)
-			if candidate.GreaterThan(ssPersonB) {
-				ssPersonB = candidate
-			}
-		}
-		if personBDeceased && !personADeceased {
-			fra := dateutil.FullRetirementAge(personA.BirthDate)
-			deceasedBenefit := CalculateSSBenefitForYear(personB, scenario.PersonB.SSStartAge, year, assumptions.COLAGeneralRate)
-			candidate := CalculateSurvivorSSBenefit(deceasedBenefit, agePersonA, fra)
-			if candidate.GreaterThan(ssPersonA) {
-				ssPersonA = candidate
-			}
+
+			result.socialSecurity = calculateSocialSecurityForYear(state, year, projectionDate, yearEnd, assumptions.COLAGeneralRate, result)
+			result.rmd = calculateRMDForYear(state, projectionDate, yearEnd, result)
 		}
 
-		// Adjust Social Security for partial year based on eligibility and retirement timing
-		if year == personARetirementYear && personARetirementYear >= 0 {
-			// PersonA can start SS when they retire (if 62+) or when they turn 62, whichever is later
-			ageAtRetirement := personA.Age(scenario.PersonA.RetirementDate)
-			if ageAtRetirement >= scenario.PersonA.SSStartAge {
-				// Can start SS immediately upon retirement. Only apply retirement-based proration
-				// if the retirement date occurs before the birthday that grants SS eligibility
-				birthdayThisYear := time.Date(projectionDate.Year(), personA.BirthDate.Month(), personA.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
-				if scenario.PersonA.RetirementDate.Before(birthdayThisYear) {
-					ssPersonA = ssPersonA.Mul(decimal.NewFromInt(1).Sub(personAWorkFraction))
-				}
-			} else {
-				// Will start SS later when turns 62
-				ssPersonA = decimal.Zero
-			}
-		}
-		if year == personBRetirementYear && personBRetirementYear >= 0 {
-			// PersonB can start SS immediately upon retirement
-			ageAtRetirement := personB.Age(scenario.PersonB.RetirementDate)
-			if ageAtRetirement >= scenario.PersonB.SSStartAge {
-				retirementDate := scenario.PersonB.RetirementDate
-				ssStartDate := time.Date(retirementDate.Year(), retirementDate.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-				monthsOfBenefits := 12 - int(ssStartDate.Month()) + 1
+		applySurvivorPensions(year, assumptions, personStates, yearResults)
+		applySocialSecuritySurvivorBenefits(year, assumptions.COLAGeneralRate, personStates, yearResults)
 
-				// Prorate SS for partial year
-				ssMonthlyBenefit := ssPersonB.Div(decimal.NewFromInt(12))
-				// Only apply retirement-based proration if retirement occurs before the birthday
-				// that makes them SS-eligible; otherwise birthday-based proration already applied.
-				birthdayThisYear := time.Date(projectionDate.Year(), personB.BirthDate.Month(), personB.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
-				if retirementDate.Before(birthdayThisYear) {
-					ssPersonB = ssMonthlyBenefit.Mul(decimal.NewFromInt(int64(monthsOfBenefits)))
-				}
-			} else {
-				ssPersonB = decimal.Zero
-			}
+		targetIncome := yearResults[0].pension.
+			Add(yearResults[1].pension).
+			Add(yearResults[0].socialSecurity).
+			Add(yearResults[1].socialSecurity).
+			Add(yearResults[0].supplement).
+			Add(yearResults[1].supplement)
+
+		for idx := range personStates {
+			state := &personStates[idx]
+			result := &yearResults[idx]
+
+			result.tspWithdrawal = ce.calculateTSPWithdrawalForPerson(state, year, projectionDate, targetIncome, result)
+			ce.updateTSPBalancesForPerson(state, projectionDate, assumptions, result)
 		}
 
-		// Calculate FERS Special Retirement Supplement (only if retired)
-		var srsPersonA, srsPersonB decimal.Decimal
-		if isPersonARetired && !personADeceased {
-			srsPersonA = CalculateFERSSupplementYear(personA, scenario.PersonA.RetirementDate, year-personARetirementYear, assumptions.InflationRate)
-			// Adjust for partial year if retiring this year
-			if year == personARetirementYear {
-				srsPersonA = srsPersonA.Mul(decimal.NewFromInt(1).Sub(personAWorkFraction))
-			}
-		}
-		if isPersonBRetired && !personBDeceased {
-			srsPersonB = CalculateFERSSupplementYear(personB, scenario.PersonB.RetirementDate, year-personBRetirementYear, assumptions.InflationRate)
-			// Adjust for partial year if retiring this year
-			if year == personBRetirementYear {
-				srsPersonB = srsPersonB.Mul(decimal.NewFromInt(1).Sub(personBWorkFraction))
-			}
-		}
-
-		// Calculate TSP withdrawals and update balances
-		var tspWithdrawalPersonA, tspWithdrawalPersonB decimal.Decimal
-
-		// Calculate RMD amounts (full and prorated) for this year for each person
-		rmdPersonA := decimal.Zero
-		rmdPersonB := decimal.Zero
-		// PersonA RMD
-		rmdAgePersonA := dateutil.GetRMDAge(personA.BirthDate.Year())
-		agePersonAEnd = personA.Age(yearEnd)
-		if agePersonA < rmdAgePersonA && agePersonAEnd >= rmdAgePersonA {
-			// First RMD year: prorate based on birthday
-			birthdayThisYear := time.Date(projectionDate.Year(), personA.BirthDate.Month(), personA.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
-			daysAfter := yearEnd.Sub(birthdayThisYear).Hours() / 24.0
-			daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
-			frac := daysAfter / daysInYear
-			if frac < 0 {
-				frac = 0
-			}
-			fullRMD := CalculateRMD(currentTSPTraditionalPersonA, personA.BirthDate.Year(), rmdAgePersonA)
-			rmdPersonA = fullRMD.Mul(decimal.NewFromFloat(frac))
-		} else if agePersonA >= rmdAgePersonA {
-			// Regular RMD year (apply full amount)
-			rmdPersonA = CalculateRMD(currentTSPTraditionalPersonA, personA.BirthDate.Year(), agePersonA)
-		}
-		// PersonB RMD
-		rmdAgePersonB := dateutil.GetRMDAge(personB.BirthDate.Year())
-		agePersonBEnd = personB.Age(yearEnd)
-		if agePersonB < rmdAgePersonB && agePersonBEnd >= rmdAgePersonB {
-			birthdayThisYear := time.Date(projectionDate.Year(), personB.BirthDate.Month(), personB.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
-			daysAfter := yearEnd.Sub(birthdayThisYear).Hours() / 24.0
-			daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
-			frac := daysAfter / daysInYear
-			if frac < 0 {
-				frac = 0
-			}
-			fullRMD := CalculateRMD(currentTSPTraditionalPersonB, personB.BirthDate.Year(), rmdAgePersonB)
-			rmdPersonB = fullRMD.Mul(decimal.NewFromFloat(frac))
-		} else if agePersonB >= rmdAgePersonB {
-			rmdPersonB = CalculateRMD(currentTSPTraditionalPersonB, personB.BirthDate.Year(), agePersonB)
-		}
-		if isPersonARetired && !personADeceased {
-			// For 4% rule: Always withdraw 4% of initial balance (adjusted for inflation)
-			if scenario.PersonA.TSPWithdrawalStrategy == "4_percent_rule" {
-				// Use the 4% rule strategy to calculate withdrawals
-				tspWithdrawalPersonA = personAStrategy.CalculateWithdrawal(
-					currentTSPTraditionalPersonA.Add(currentTSPRothPersonA),
-					year-personARetirementYear+1,
-					decimal.Zero, // Not used for 4% rule
-					agePersonA,
-					dateutil.IsRMDYear(personA.BirthDate, projectionDate),
-					CalculateRMD(currentTSPTraditionalPersonA, personA.BirthDate.Year(), agePersonA),
-				)
-				// Adjust for partial year if retiring this year
-				if year == personARetirementYear {
-					tspWithdrawalPersonA = tspWithdrawalPersonA.Mul(decimal.NewFromInt(1).Sub(personAWorkFraction))
-				}
-			} else {
-				// For need_based: Use the target monthly amount
-				targetIncome := pensionPersonA.Add(pensionPersonB).Add(ssPersonA).Add(ssPersonB).Add(srsPersonA).Add(srsPersonB)
-
-				// Calculate withdrawals
-				tspWithdrawalPersonA = personAStrategy.CalculateWithdrawal(
-					currentTSPTraditionalPersonA.Add(currentTSPRothPersonA),
-					year-personARetirementYear+1,
-					targetIncome,
-					agePersonA,
-					(dateutil.IsRMDYear(personA.BirthDate, projectionDate) || rmdPersonA.GreaterThan(decimal.Zero)),
-					rmdPersonA,
-				)
-				// Adjust for partial year if retiring this year
-				if year == personARetirementYear {
-					tspWithdrawalPersonA = tspWithdrawalPersonA.Mul(decimal.NewFromInt(1).Sub(personAWorkFraction))
-				}
-			}
-		}
-
-		if isPersonBRetired && !personBDeceased {
-			if scenario.PersonB.TSPWithdrawalStrategy == "4_percent_rule" {
-				tspWithdrawalPersonB = personBStrategy.CalculateWithdrawal(
-					currentTSPTraditionalPersonB.Add(currentTSPRothPersonB),
-					year-personBRetirementYear+1,
-					decimal.Zero, // Not used for 4% rule
-					agePersonB,
-					dateutil.IsRMDYear(personB.BirthDate, projectionDate),
-					CalculateRMD(currentTSPTraditionalPersonB, personB.BirthDate.Year(), agePersonB),
-				)
-				// Adjust for partial year if retiring this year
-				if year == personBRetirementYear {
-					tspWithdrawalPersonB = tspWithdrawalPersonB.Mul(decimal.NewFromInt(1).Sub(personBWorkFraction))
-				}
-			} else {
-				// For need_based: Use the target monthly amount
-				targetIncome := pensionPersonA.Add(pensionPersonB).Add(ssPersonA).Add(ssPersonB).Add(srsPersonA).Add(srsPersonB)
-
-				// Calculate withdrawals
-				tspWithdrawalPersonB = personBStrategy.CalculateWithdrawal(
-					currentTSPTraditionalPersonB.Add(currentTSPRothPersonB),
-					year-personBRetirementYear+1,
-					targetIncome,
-					agePersonB,
-					(dateutil.IsRMDYear(personB.BirthDate, projectionDate) || rmdPersonB.GreaterThan(decimal.Zero)),
-					rmdPersonB,
-				)
-				// Adjust for partial year if retiring this year
-				if year == personBRetirementYear {
-					tspWithdrawalPersonB = tspWithdrawalPersonB.Mul(decimal.NewFromInt(1).Sub(personBWorkFraction))
-				}
-			}
-		}
-
-		// Update TSP balances
-		if isPersonARetired {
-			// Post-retirement TSP growth with withdrawals
-			// Use lifecycle fund allocation if available, otherwise use default return rate
-			if personA.TSPLifecycleFund != nil || personA.TSPAllocation != nil {
-				// Apply withdrawal first
-				if tspWithdrawalPersonA.GreaterThan(currentTSPTraditionalPersonA) {
-					// Take from Roth if traditional is insufficient
-					remainingWithdrawal := tspWithdrawalPersonA.Sub(currentTSPTraditionalPersonA)
-					currentTSPTraditionalPersonA = decimal.Zero
-					if remainingWithdrawal.GreaterThan(currentTSPRothPersonA) {
-						currentTSPRothPersonA = decimal.Zero
-					} else {
-						currentTSPRothPersonA = currentTSPRothPersonA.Sub(remainingWithdrawal)
-					}
-				} else {
-					currentTSPTraditionalPersonA = currentTSPTraditionalPersonA.Sub(tspWithdrawalPersonA)
-				}
-
-				// Apply growth using lifecycle fund allocation
-				allocation := ce.getTSPAllocationForEmployee(personA, projectionDate)
-				weightedReturn := ce.calculateTSPReturnWithAllocation(allocation, projectionDate.Year())
-
-				currentTSPTraditionalPersonA = currentTSPTraditionalPersonA.Mul(decimal.NewFromFloat(1).Add(weightedReturn))
-				currentTSPRothPersonA = currentTSPRothPersonA.Mul(decimal.NewFromFloat(1).Add(weightedReturn))
-			} else {
-				currentTSPTraditionalPersonA, currentTSPRothPersonA = ce.updateTSPBalances(
-					currentTSPTraditionalPersonA, currentTSPRothPersonA, tspWithdrawalPersonA,
-					assumptions.TSPReturnPostRetirement,
-				)
-			}
-		} else {
-			// Pre-retirement TSP growth with contributions
-			// Use lifecycle fund allocation if available, otherwise use default return rate
-			if personA.TSPLifecycleFund != nil || personA.TSPAllocation != nil {
-				currentTSPTraditionalPersonA = ce.growTSPBalanceWithAllocation(personA, currentTSPTraditionalPersonA, personA.TotalAnnualTSPContribution(), projectionDate)
-				currentTSPRothPersonA = ce.growTSPBalanceWithAllocation(personA, currentTSPRothPersonA, decimal.Zero, projectionDate)
-			} else {
-				currentTSPTraditionalPersonA = ce.growTSPBalance(currentTSPTraditionalPersonA, personA.TotalAnnualTSPContribution(), assumptions.TSPReturnPreRetirement)
-				currentTSPRothPersonA = ce.growTSPBalance(currentTSPRothPersonA, decimal.Zero, assumptions.TSPReturnPreRetirement)
-			}
-		}
-
-		if isPersonBRetired {
-			// Post-retirement TSP growth with withdrawals
-			// Use lifecycle fund allocation if available, otherwise use default return rate
-			if personB.TSPLifecycleFund != nil || personB.TSPAllocation != nil {
-				// Apply withdrawal first
-				if tspWithdrawalPersonB.GreaterThan(currentTSPTraditionalPersonB) {
-					// Take from Roth if traditional is insufficient
-					remainingWithdrawal := tspWithdrawalPersonB.Sub(currentTSPTraditionalPersonB)
-					currentTSPTraditionalPersonB = decimal.Zero
-					if remainingWithdrawal.GreaterThan(currentTSPRothPersonB) {
-						currentTSPRothPersonB = decimal.Zero
-					} else {
-						currentTSPRothPersonB = currentTSPRothPersonB.Sub(remainingWithdrawal)
-					}
-				} else {
-					currentTSPTraditionalPersonB = currentTSPTraditionalPersonB.Sub(tspWithdrawalPersonB)
-				}
-
-				// Apply growth using lifecycle fund allocation
-				allocation := ce.getTSPAllocationForEmployee(personB, projectionDate)
-				weightedReturn := ce.calculateTSPReturnWithAllocation(allocation, projectionDate.Year())
-
-				currentTSPTraditionalPersonB = currentTSPTraditionalPersonB.Mul(decimal.NewFromFloat(1).Add(weightedReturn))
-				currentTSPRothPersonB = currentTSPRothPersonB.Mul(decimal.NewFromFloat(1).Add(weightedReturn))
-			} else {
-				currentTSPTraditionalPersonB, currentTSPRothPersonB = ce.updateTSPBalances(
-					currentTSPTraditionalPersonB, currentTSPRothPersonB, tspWithdrawalPersonB,
-					assumptions.TSPReturnPostRetirement,
-				)
-			}
-		} else {
-			// Pre-retirement TSP growth with contributions
-			// Use lifecycle fund allocation if available, otherwise use default return rate
-			if personB.TSPLifecycleFund != nil || personB.TSPAllocation != nil {
-				currentTSPTraditionalPersonB = ce.growTSPBalanceWithAllocation(personB, currentTSPTraditionalPersonB, personB.TotalAnnualTSPContribution(), projectionDate)
-				currentTSPRothPersonB = ce.growTSPBalanceWithAllocation(personB, currentTSPRothPersonB, decimal.Zero, projectionDate)
-			} else {
-				currentTSPTraditionalPersonB = ce.growTSPBalance(currentTSPTraditionalPersonB, personB.TotalAnnualTSPContribution(), assumptions.TSPReturnPreRetirement)
-				currentTSPRothPersonB = ce.growTSPBalance(currentTSPRothPersonB, decimal.Zero, assumptions.TSPReturnPreRetirement)
-			}
-		}
-
-		// Debug TSP balances for Scenario 2 to show extra growth
-		if ce.Debug && year == 1 && scenario.PersonA.RetirementDate.Year() == 2027 {
-			ce.Logger.Debugf("TSP Growth in Scenario 2 (year %d)", ProjectionBaseYear+year)
-			ce.Logger.Debugf("  PersonA's TSP balance: %s", currentTSPTraditionalPersonA.Add(currentTSPRothPersonA).StringFixed(2))
-			ce.Logger.Debugf("  PersonB's TSP balance: %s", currentTSPTraditionalPersonB.Add(currentTSPRothPersonB).StringFixed(2))
-			ce.Logger.Debugf("  Combined TSP balance: %s", currentTSPTraditionalPersonA.Add(currentTSPRothPersonA).Add(currentTSPTraditionalPersonB).Add(currentTSPRothPersonB).StringFixed(2))
-			ce.Logger.Debugf("")
-		}
-
-		// Calculate FEHB premiums
 		fehbPremium := CalculateFEHBPremium(personA, year, assumptions.FEHBPremiumInflation, federalRules.FEHBConfig)
 
-		// Calculate Medicare premiums (if applicable)
-		medicarePremium := ce.calculateMedicarePremium(personA, personB, projectionDate,
-			pensionPersonA, pensionPersonB, tspWithdrawalPersonA, tspWithdrawalPersonB, ssPersonA, ssPersonB)
-
-		// Calculate taxes - handle transition years properly
-		// Pass the actual working income and retirement income separately
-		workingIncomePersonA := personA.CurrentSalary.Mul(personAWorkFraction)
-		workingIncomePersonB := personB.CurrentSalary.Mul(personBWorkFraction)
-
-		federalTax, stateTax, localTax, ficaTax, taxableTotal, stdDedUsed, filingStatusUsed, seniors65 := ce.calculateTaxes(
-			personA, personB, scenario, year, isPersonARetired && isPersonBRetired,
-			pensionPersonA, pensionPersonB, survivorPensionPersonA, survivorPensionPersonB,
-			tspWithdrawalPersonA, tspWithdrawalPersonB,
-			ssPersonA, ssPersonB,
-			workingIncomePersonA, workingIncomePersonB,
+		medicarePremium := ce.calculateMedicarePremium(
+			personA,
+			personB,
+			projectionDate,
+			yearResults[0].pension,
+			yearResults[1].pension,
+			yearResults[0].tspWithdrawal,
+			yearResults[1].tspWithdrawal,
+			yearResults[0].socialSecurity,
+			yearResults[1].socialSecurity,
 		)
 
-		// Calculate TSP contributions (only for working portion of year)
-		var tspContributions decimal.Decimal
-		if (!isPersonARetired || !isPersonBRetired) && !(personADeceased || personBDeceased) {
-			personAContributions := personA.TotalAnnualTSPContribution().Mul(personAWorkFraction)
-			personBContributions := personB.TotalAnnualTSPContribution().Mul(personBWorkFraction)
+		federalTax, stateTax, localTax, ficaTax, taxableTotal, stdDedUsed, filingStatusUsed, seniors65 := ce.calculateTaxes(
+			personA,
+			personB,
+			scenario,
+			year,
+			yearResults[0].isRetired && yearResults[1].isRetired,
+			yearResults[0].pension,
+			yearResults[1].pension,
+			yearResults[0].survivorPension,
+			yearResults[1].survivorPension,
+			yearResults[0].tspWithdrawal,
+			yearResults[1].tspWithdrawal,
+			yearResults[0].socialSecurity,
+			yearResults[1].socialSecurity,
+			yearResults[0].salary,
+			yearResults[1].salary,
+		)
+
+		tspContributions := decimal.Zero
+		if (!yearResults[0].isRetired || !yearResults[1].isRetired) && !(personStates[0].deceased || personStates[1].deceased) {
+			personAContributions := personA.TotalAnnualTSPContribution().Mul(yearResults[0].workFraction)
+			personBContributions := personB.TotalAnnualTSPContribution().Mul(yearResults[1].workFraction)
 			tspContributions = personAContributions.Add(personBContributions)
 		}
 
-		// Create annual cash flow
 		cashFlow := domain.AnnualCashFlow{
 			Year:                     year + 1,
 			Date:                     projectionDate,
-			AgePersonA:               agePersonA,
-			AgePersonB:               agePersonB,
-			SalaryPersonA:            personA.CurrentSalary.Mul(personAWorkFraction),
-			SalaryPersonB:            personB.CurrentSalary.Mul(personBWorkFraction),
-			PensionPersonA:           pensionPersonA,
-			PensionPersonB:           pensionPersonB,
-			TSPWithdrawalPersonA:     tspWithdrawalPersonA,
-			TSPWithdrawalPersonB:     tspWithdrawalPersonB,
-			SSBenefitPersonA:         ssPersonA,
-			SSBenefitPersonB:         ssPersonB,
-			FERSSupplementPersonA:    srsPersonA,
-			FERSSupplementPersonB:    srsPersonB,
+			AgePersonA:               yearResults[0].ageStart,
+			AgePersonB:               yearResults[1].ageStart,
+			SalaryPersonA:            yearResults[0].salary,
+			SalaryPersonB:            yearResults[1].salary,
+			PensionPersonA:           yearResults[0].pension,
+			PensionPersonB:           yearResults[1].pension,
+			TSPWithdrawalPersonA:     yearResults[0].tspWithdrawal,
+			TSPWithdrawalPersonB:     yearResults[1].tspWithdrawal,
+			SSBenefitPersonA:         yearResults[0].socialSecurity,
+			SSBenefitPersonB:         yearResults[1].socialSecurity,
+			FERSSupplementPersonA:    yearResults[0].supplement,
+			FERSSupplementPersonB:    yearResults[1].supplement,
 			FederalTax:               federalTax,
 			FederalTaxableIncome:     taxableTotal,
 			FederalStandardDeduction: stdDedUsed,
@@ -583,49 +187,43 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 			TSPContributions:         tspContributions,
 			FEHBPremium:              fehbPremium,
 			MedicarePremium:          medicarePremium,
-			TSPBalancePersonA:        currentTSPTraditionalPersonA.Add(currentTSPRothPersonA),
-			TSPBalancePersonB:        currentTSPTraditionalPersonB.Add(currentTSPRothPersonB),
-			TSPBalanceTraditional:    currentTSPTraditionalPersonA.Add(currentTSPTraditionalPersonB),
-			TSPBalanceRoth:           currentTSPRothPersonA.Add(currentTSPRothPersonB),
-			IsRetired:                isPersonARetired && isPersonBRetired, // Both retired
+			TSPBalancePersonA:        personStates[0].traditional.Add(personStates[0].roth),
+			TSPBalancePersonB:        personStates[1].traditional.Add(personStates[1].roth),
+			TSPBalanceTraditional:    personStates[0].traditional.Add(personStates[1].traditional),
+			TSPBalanceRoth:           personStates[0].roth.Add(personStates[1].roth),
+			IsRetired:                yearResults[0].isRetired && yearResults[1].isRetired,
 			IsMedicareEligible:       dateutil.IsMedicareEligible(personA.BirthDate, projectionDate) || dateutil.IsMedicareEligible(personB.BirthDate, projectionDate),
 			IsRMDYear:                dateutil.IsRMDYear(personA.BirthDate, projectionDate) || dateutil.IsRMDYear(personB.BirthDate, projectionDate),
-			RMDAmount:                rmdPersonA.Add(rmdPersonB),
-			PersonADeceased:          personADeceased,
-			PersonBDeceased:          personBDeceased,
+			RMDAmount:                yearResults[0].rmd.Add(yearResults[1].rmd),
+			PersonADeceased:          personStates[0].deceased,
+			PersonBDeceased:          personStates[1].deceased,
 			FilingStatusSingle:       false,
 		}
 
-		// Determine filing status for display (mirror simplified logic in taxes.go)
-		if scenario.Mortality != nil && scenario.Mortality.Assumptions != nil && (personADeceased != personBDeceased) {
-			mode := scenario.Mortality.Assumptions.FilingStatusSwitch
-			// Reconstruct death year indexes (already computed earlier): reuse conditions
-			switch mode {
+		if scenario.Mortality != nil && scenario.Mortality.Assumptions != nil && (personStates[0].deceased != personStates[1].deceased) {
+			switch scenario.Mortality.Assumptions.FilingStatusSwitch {
 			case "immediate":
 				cashFlow.FilingStatusSingle = true
 			case "next_year":
-				if personADeathYearIndex != nil && personADeceased && year > *personADeathYearIndex {
+				if personStates[0].deathYearIndex != nil && personStates[0].deceased && year > *personStates[0].deathYearIndex {
 					cashFlow.FilingStatusSingle = true
 				}
-				if personBDeathYearIndex != nil && personBDeceased && year > *personBDeathYearIndex {
+				if personStates[1].deathYearIndex != nil && personStates[1].deceased && year > *personStates[1].deathYearIndex {
 					cashFlow.FilingStatusSingle = true
 				}
 			}
 		}
 
-		// Inject survivor pension values
-		cashFlow.SurvivorPensionPersonA = survivorPensionPersonA
-		cashFlow.SurvivorPensionPersonB = survivorPensionPersonB
+		cashFlow.SurvivorPensionPersonA = yearResults[0].survivorPension
+		cashFlow.SurvivorPensionPersonB = yearResults[1].survivorPension
 
-		// Apply survivor spending factor by scaling discretionary withdrawals and original pensions (not survivor annuity)
-		if (personADeceased || personBDeceased) && survivorSpendingFactor.LessThan(decimal.NewFromFloat(0.999)) {
+		if (personStates[0].deceased || personStates[1].deceased) && survivorSpendingFactor.LessThan(decimal.NewFromFloat(0.999)) {
 			cashFlow.TSPWithdrawalPersonA = cashFlow.TSPWithdrawalPersonA.Mul(survivorSpendingFactor)
 			cashFlow.TSPWithdrawalPersonB = cashFlow.TSPWithdrawalPersonB.Mul(survivorSpendingFactor)
 			cashFlow.PensionPersonA = cashFlow.PensionPersonA.Mul(survivorSpendingFactor)
 			cashFlow.PensionPersonB = cashFlow.PensionPersonB.Mul(survivorSpendingFactor)
 		}
 
-		// Calculate total gross income and net income
 		cashFlow.TotalGrossIncome = cashFlow.CalculateTotalIncome()
 		cashFlow.CalculateNetIncome()
 
@@ -633,4 +231,337 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 	}
 
 	return projection
+}
+
+func newPersonProjectionState(employee *domain.Employee, scenario *domain.RetirementScenario, strategy TSPWithdrawalStrategy, deathYearIndex *int, mortalitySpec *domain.MortalitySpec, label string, ssMode ssRetirementProration) personProjectionState {
+	return personProjectionState{
+		employee:       employee,
+		scenario:       scenario,
+		strategy:       strategy,
+		traditional:    employee.TSPBalanceTraditional,
+		roth:           employee.TSPBalanceRoth,
+		retirementYear: scenario.RetirementDate.Year() - ProjectionBaseYear,
+		deathYearIndex: deathYearIndex,
+		mortalitySpec:  mortalitySpec,
+		label:          label,
+		ssProration:    ssMode,
+	}
+}
+
+func scenarioMortalitySpec(scenario *domain.Scenario, isPersonA bool) *domain.MortalitySpec {
+	if scenario == nil || scenario.Mortality == nil {
+		return nil
+	}
+	if isPersonA {
+		return scenario.Mortality.PersonA
+	}
+	return scenario.Mortality.PersonB
+}
+
+func calculateWorkFraction(year, retirementYear int, retirementDate, projectionDate time.Time, isRetired bool) decimal.Decimal {
+	if year == retirementYear && retirementYear >= 0 {
+		yearStart := time.Date(projectionDate.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		daysWorked := retirementDate.Sub(yearStart).Hours() / 24.0
+		if daysWorked < 0 {
+			daysWorked = 0
+		}
+		daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
+		if daysInYear == 0 {
+			return decimal.Zero
+		}
+		frac := daysWorked / daysInYear
+		if frac < 0 {
+			frac = 0
+		}
+		if frac > 1 {
+			frac = 1
+		}
+		return decimal.NewFromFloat(frac)
+	}
+	if isRetired {
+		return decimal.Zero
+	}
+	return decimal.NewFromInt(1)
+}
+
+func calculatePensionForYear(state *personProjectionState, year int, cola decimal.Decimal, workFraction decimal.Decimal) decimal.Decimal {
+	pension := CalculatePensionForYear(state.employee, state.scenario.RetirementDate, year-state.retirementYear, cola)
+	if year == state.retirementYear && state.retirementYear >= 0 {
+		pension = pension.Mul(decimal.NewFromInt(1).Sub(workFraction))
+	}
+	return pension
+}
+
+func (ce *CalculationEngine) logPensionDebug(state *personProjectionState, year int, pension decimal.Decimal) {
+	ce.Logger.Debugf("DEBUG: %s pension calculation for year %d", state.label, ProjectionBaseYear+year)
+	ce.Logger.Debugf("  Retirement date: %s", state.scenario.RetirementDate.Format("2006-01-02"))
+	ce.Logger.Debugf("  Age at retirement: %d", state.employee.Age(state.scenario.RetirementDate))
+	ce.Logger.Debugf("  Years of service: %s", state.employee.YearsOfService(state.scenario.RetirementDate).StringFixed(2))
+	ce.Logger.Debugf("  High-3 salary: %s", state.employee.High3Salary.StringFixed(2))
+
+	pensionCalc := CalculateFERSPension(state.employee, state.scenario.RetirementDate)
+	ce.Logger.Debugf("  Multiplier: %s", pensionCalc.Multiplier.StringFixed(4))
+	ce.Logger.Debugf("  ANNUAL pension (before reduction): $%s", pensionCalc.AnnualPension.StringFixed(2))
+	ce.Logger.Debugf("  Survivor election: %s", pensionCalc.SurvivorElection.StringFixed(4))
+	ce.Logger.Debugf("  ANNUAL pension (final): $%s", pensionCalc.ReducedPension.StringFixed(2))
+	ce.Logger.Debugf("  MONTHLY pension amount: $%s", pensionCalc.ReducedPension.Div(decimal.NewFromInt(12)).StringFixed(2))
+	ce.Logger.Debugf("  Current-year cash received (partial): $%s", pension.StringFixed(2))
+}
+
+func calculateSupplementForYear(state *personProjectionState, year int, inflation decimal.Decimal, workFraction decimal.Decimal) decimal.Decimal {
+	supplement := CalculateFERSSupplementYear(state.employee, state.scenario.RetirementDate, year-state.retirementYear, inflation)
+	if year == state.retirementYear && state.retirementYear >= 0 {
+		supplement = supplement.Mul(decimal.NewFromInt(1).Sub(workFraction))
+	}
+	return supplement
+}
+
+func calculateSocialSecurityForYear(state *personProjectionState, year int, projectionDate, yearEnd time.Time, cola decimal.Decimal, result *personAnnualResult) decimal.Decimal {
+	if state.deceased || !result.isRetired {
+		return decimal.Zero
+	}
+
+	ss := CalculateSSBenefitForYear(state.employee, state.scenario.SSStartAge, year, cola)
+
+	if result.ageStart < state.scenario.SSStartAge && result.ageEnd >= state.scenario.SSStartAge {
+		birthdayThisYear := time.Date(projectionDate.Year(), state.employee.BirthDate.Month(), state.employee.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
+		if !(year == state.retirementYear && state.scenario.RetirementDate.Before(birthdayThisYear)) {
+			daysAfter := yearEnd.Sub(birthdayThisYear).Hours() / 24.0
+			daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
+			if daysInYear > 0 {
+				frac := daysAfter / daysInYear
+				if frac < 0 {
+					frac = 0
+				}
+				if frac > 1 {
+					frac = 1
+				}
+				ss = ss.Mul(decimal.NewFromFloat(frac))
+			}
+		}
+	}
+
+	if year == state.retirementYear && state.retirementYear >= 0 {
+		ageAtRetirement := state.employee.Age(state.scenario.RetirementDate)
+		if ageAtRetirement >= state.scenario.SSStartAge {
+			switch state.ssProration {
+			case ssProrationMonthlyAfterRetirement:
+				retirementDate := state.scenario.RetirementDate
+				ssStartDate := time.Date(retirementDate.Year(), retirementDate.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+				if ssStartDate.Year() > projectionDate.Year() {
+					return decimal.Zero
+				}
+				monthsOfBenefits := 12 - int(ssStartDate.Month()) + 1
+				if monthsOfBenefits < 0 {
+					monthsOfBenefits = 0
+				}
+				if monthsOfBenefits > 12 {
+					monthsOfBenefits = 12
+				}
+				birthdayThisYear := time.Date(projectionDate.Year(), state.employee.BirthDate.Month(), state.employee.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
+				if retirementDate.Before(birthdayThisYear) {
+					monthly := ss.Div(decimal.NewFromInt(12))
+					ss = monthly.Mul(decimal.NewFromInt(int64(monthsOfBenefits)))
+				} else if monthsOfBenefits <= 0 {
+					ss = decimal.Zero
+				}
+			default:
+				birthdayThisYear := time.Date(projectionDate.Year(), state.employee.BirthDate.Month(), state.employee.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
+				if state.scenario.RetirementDate.Before(birthdayThisYear) {
+					ss = ss.Mul(decimal.NewFromInt(1).Sub(result.workFraction))
+				}
+			}
+		} else {
+			return decimal.Zero
+		}
+	}
+
+	return ss
+}
+
+func calculateRMDForYear(state *personProjectionState, projectionDate, yearEnd time.Time, result *personAnnualResult) decimal.Decimal {
+	rmdAge := dateutil.GetRMDAge(state.employee.BirthDate.Year())
+	if result.ageStart < rmdAge && result.ageEnd >= rmdAge {
+		birthdayThisYear := time.Date(projectionDate.Year(), state.employee.BirthDate.Month(), state.employee.BirthDate.Day(), 0, 0, 0, 0, time.UTC)
+		daysAfter := yearEnd.Sub(birthdayThisYear).Hours() / 24.0
+		daysInYear := float64(dateutil.DaysInYear(projectionDate.Year()))
+		if daysInYear == 0 {
+			return decimal.Zero
+		}
+		frac := daysAfter / daysInYear
+		if frac < 0 {
+			frac = 0
+		}
+		if frac > 1 {
+			frac = 1
+		}
+		fullRMD := CalculateRMD(state.traditional, state.employee.BirthDate.Year(), rmdAge)
+		return fullRMD.Mul(decimal.NewFromFloat(frac))
+	}
+	if result.ageStart >= rmdAge {
+		return CalculateRMD(state.traditional, state.employee.BirthDate.Year(), result.ageStart)
+	}
+	return decimal.Zero
+}
+
+func applySurvivorPensions(year int, assumptions *domain.GlobalAssumptions, states []personProjectionState, results []personAnnualResult) {
+	for idx := range states {
+		decedent := &states[idx]
+		if decedent.deathYearIndex == nil || year < *decedent.deathYearIndex {
+			continue
+		}
+		survivorIdx := 1 - idx
+		survivor := &states[survivorIdx]
+		if survivor.deceased || !results[idx].isRetired {
+			continue
+		}
+
+		baseCalc := CalculateFERSPension(decedent.employee, decedent.scenario.RetirementDate)
+		yearsSinceRet := year - decedent.retirementYear
+		if yearsSinceRet < 0 {
+			yearsSinceRet = 0
+		}
+
+		currentSurvivor := baseCalc.SurvivorAnnuity
+		for cy := 1; cy <= yearsSinceRet; cy++ {
+			projDate := decedent.scenario.RetirementDate.AddDate(cy, 0, 0)
+			ageAt := decedent.employee.Age(projDate)
+			currentSurvivor = ApplyFERSPensionCOLA(currentSurvivor, assumptions.COLAGeneralRate, ageAt)
+		}
+
+		var survivorAmount decimal.Decimal
+		if year == *decedent.deathYearIndex {
+			var deathDate *time.Time
+			if decedent.mortalitySpec != nil {
+				deathDate = decedent.mortalitySpec.DeathDate
+			}
+			frac, occurred := deathFractionInYear(decedent.deathYearIndex, year, deathDate)
+			if occurred {
+				survivorAmount = currentSurvivor.Mul(decimal.NewFromInt(1).Sub(frac))
+			} else {
+				survivorAmount = currentSurvivor
+			}
+		} else {
+			survivorAmount = currentSurvivor
+		}
+
+		results[survivorIdx].survivorPension = survivorAmount
+	}
+}
+
+func applySocialSecuritySurvivorBenefits(year int, cola decimal.Decimal, states []personProjectionState, results []personAnnualResult) {
+	if states[0].deceased && !states[1].deceased {
+		fra := dateutil.FullRetirementAge(states[1].employee.BirthDate)
+		deceasedBenefit := CalculateSSBenefitForYear(states[0].employee, states[0].scenario.SSStartAge, year, cola)
+		candidate := CalculateSurvivorSSBenefit(deceasedBenefit, results[1].ageStart, fra)
+		if candidate.GreaterThan(results[1].socialSecurity) {
+			results[1].socialSecurity = candidate
+		}
+	}
+	if states[1].deceased && !states[0].deceased {
+		fra := dateutil.FullRetirementAge(states[0].employee.BirthDate)
+		deceasedBenefit := CalculateSSBenefitForYear(states[1].employee, states[1].scenario.SSStartAge, year, cola)
+		candidate := CalculateSurvivorSSBenefit(deceasedBenefit, results[0].ageStart, fra)
+		if candidate.GreaterThan(results[0].socialSecurity) {
+			results[0].socialSecurity = candidate
+		}
+	}
+}
+
+func (ce *CalculationEngine) calculateTSPWithdrawalForPerson(state *personProjectionState, year int, projectionDate time.Time, targetIncome decimal.Decimal, result *personAnnualResult) decimal.Decimal {
+	if !result.isRetired || state.deceased {
+		return decimal.Zero
+	}
+
+	yearsIntoRetirement := year - state.retirementYear + 1
+	currentBalance := state.traditional.Add(state.roth)
+
+	switch state.scenario.TSPWithdrawalStrategy {
+	case "4_percent_rule":
+		withdrawal := state.strategy.CalculateWithdrawal(
+			currentBalance,
+			yearsIntoRetirement,
+			decimal.Zero,
+			result.ageStart,
+			dateutil.IsRMDYear(state.employee.BirthDate, projectionDate),
+			CalculateRMD(state.traditional, state.employee.BirthDate.Year(), result.ageStart),
+		)
+		if year == state.retirementYear && state.retirementYear >= 0 {
+			withdrawal = withdrawal.Mul(decimal.NewFromInt(1).Sub(result.workFraction))
+		}
+		return withdrawal
+	default:
+		isRMDYear := dateutil.IsRMDYear(state.employee.BirthDate, projectionDate) || result.rmd.GreaterThan(decimal.Zero)
+		withdrawal := state.strategy.CalculateWithdrawal(
+			currentBalance,
+			yearsIntoRetirement,
+			targetIncome,
+			result.ageStart,
+			isRMDYear,
+			result.rmd,
+		)
+		if year == state.retirementYear && state.retirementYear >= 0 {
+			withdrawal = withdrawal.Mul(decimal.NewFromInt(1).Sub(result.workFraction))
+		}
+		return withdrawal
+	}
+}
+
+func (ce *CalculationEngine) updateTSPBalancesForPerson(state *personProjectionState, projectionDate time.Time, assumptions *domain.GlobalAssumptions, result *personAnnualResult) {
+	if result.isRetired {
+		if state.employee.TSPLifecycleFund != nil || state.employee.TSPAllocation != nil {
+			if result.tspWithdrawal.GreaterThan(state.traditional) {
+				remaining := result.tspWithdrawal.Sub(state.traditional)
+				state.traditional = decimal.Zero
+				if remaining.GreaterThan(state.roth) {
+					state.roth = decimal.Zero
+				} else {
+					state.roth = state.roth.Sub(remaining)
+				}
+			} else {
+				state.traditional = state.traditional.Sub(result.tspWithdrawal)
+			}
+
+			allocation := ce.getTSPAllocationForEmployee(state.employee, projectionDate)
+			weightedReturn := ce.calculateTSPReturnWithAllocation(allocation, projectionDate.Year())
+			growthFactor := decimal.NewFromInt(1).Add(weightedReturn)
+			state.traditional = state.traditional.Mul(growthFactor)
+			state.roth = state.roth.Mul(growthFactor)
+		} else {
+			state.traditional, state.roth = ce.updateTSPBalances(state.traditional, state.roth, result.tspWithdrawal, assumptions.TSPReturnPostRetirement)
+		}
+		return
+	}
+
+	contributions := state.employee.TotalAnnualTSPContribution()
+	if state.employee.TSPLifecycleFund != nil || state.employee.TSPAllocation != nil {
+		state.traditional = ce.growTSPBalanceWithAllocation(state.employee, state.traditional, contributions, projectionDate)
+		state.roth = ce.growTSPBalanceWithAllocation(state.employee, state.roth, decimal.Zero, projectionDate)
+	} else {
+		state.traditional = ce.growTSPBalance(state.traditional, contributions, assumptions.TSPReturnPreRetirement)
+		state.roth = ce.growTSPBalance(state.roth, decimal.Zero, assumptions.TSPReturnPreRetirement)
+	}
+}
+
+func shouldMergeTSP(scenario *domain.Scenario) bool {
+	return scenario != nil && scenario.Mortality != nil && scenario.Mortality.Assumptions != nil && scenario.Mortality.Assumptions.TSPSpousalTransfer == "merge"
+}
+
+func applyTSPSpousalTransfer(personA, personB *personProjectionState) {
+	if personA.deceased && !personB.deceased {
+		if !personA.traditional.IsZero() || !personA.roth.IsZero() {
+			personB.traditional = personB.traditional.Add(personA.traditional)
+			personB.roth = personB.roth.Add(personA.roth)
+			personA.traditional = decimal.Zero
+			personA.roth = decimal.Zero
+		}
+	}
+	if personB.deceased && !personA.deceased {
+		if !personB.traditional.IsZero() || !personB.roth.IsZero() {
+			personA.traditional = personA.traditional.Add(personB.traditional)
+			personA.roth = personA.roth.Add(personB.roth)
+			personB.traditional = decimal.Zero
+			personB.roth = decimal.Zero
+		}
+	}
 }

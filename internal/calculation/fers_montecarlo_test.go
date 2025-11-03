@@ -110,8 +110,11 @@ func TestFERSMonteCarloMarketConditionGeneration(t *testing.T) {
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
 
+	generator := newMarketGenerator(&engine.config, engine.historicalData)
+
 	// Test historical market condition generation
-	historicalMarket := engine.generateHistoricalMarketConditions()
+	engine.config.UseHistorical = true
+	historicalMarket := generator.generateMarketConditions()
 
 	// Verify historical market conditions
 	if historicalMarket.Year < 1990 || historicalMarket.Year > 2023 {
@@ -123,7 +126,8 @@ func TestFERSMonteCarloMarketConditionGeneration(t *testing.T) {
 	}
 
 	// Test statistical market condition generation
-	statisticalMarket := engine.generateStatisticalMarketConditions()
+	engine.config.UseHistorical = false
+	statisticalMarket := generator.generateMarketConditions()
 
 	// Verify statistical market conditions
 	if statisticalMarket.Year < 2025 || statisticalMarket.Year > 2055 {
@@ -145,10 +149,12 @@ func TestFERSMonteCarloStatisticalDistributions(t *testing.T) {
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
 
+	generator := newMarketGenerator(&engine.config, engine.historicalData)
+
 	// Test TSP return generation
 	funds := []string{"C", "S", "I", "F", "G"}
 	for _, fund := range funds {
-		returnRate := engine.generateStatisticalTSPReturn(fund)
+		returnRate := generator.generateStatisticalTSPReturn(fund)
 
 		// Verify return rate is reasonable (not extreme)
 		if returnRate.LessThan(decimal.NewFromFloat(-0.5)) ||
@@ -158,21 +164,21 @@ func TestFERSMonteCarloStatisticalDistributions(t *testing.T) {
 	}
 
 	// Test inflation generation
-	inflation := engine.generateStatisticalInflation()
+	inflation := generator.generateStatisticalInflation()
 	if inflation.LessThan(decimal.NewFromFloat(-0.1)) ||
 		inflation.GreaterThan(decimal.NewFromFloat(0.2)) {
 		t.Errorf("Inflation rate should be reasonable, got %s", inflation.String())
 	}
 
 	// Test COLA generation
-	cola := engine.generateStatisticalCOLA()
+	cola := generator.generateStatisticalCOLA()
 	if cola.LessThan(decimal.NewFromFloat(-0.1)) ||
 		cola.GreaterThan(decimal.NewFromFloat(0.2)) {
 		t.Errorf("COLA rate should be reasonable, got %s", cola.String())
 	}
 
 	// Test FEHB increase generation
-	fehb := engine.generateStatisticalFEHBIncrease()
+	fehb := generator.generateStatisticalFEHBIncrease()
 	if fehb.LessThan(decimal.NewFromFloat(-0.1)) ||
 		fehb.GreaterThan(decimal.NewFromFloat(0.3)) {
 		t.Errorf("FEHB increase should be reasonable, got %s", fehb.String())
@@ -188,6 +194,8 @@ func TestFERSMonteCarloMetricsCalculation(t *testing.T) {
 
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
+
+	metricsCalc := newMetricsCalculator(&engine.config)
 
 	// Create test simulations
 	simulations := []FERSMonteCarloSimulation{
@@ -230,7 +238,7 @@ func TestFERSMonteCarloMetricsCalculation(t *testing.T) {
 	}
 
 	// Calculate aggregate results
-	result := engine.calculateAggregateResults(simulations)
+	result := metricsCalc.aggregateResults(simulations)
 
 	// Verify results (with tolerance for floating point precision)
 	expectedSuccessRate := decimal.NewFromFloat(2.0 / 3.0) // 2 out of 3 successful
