@@ -47,6 +47,13 @@ type RetirementScenario struct {
 	TSPWithdrawalStrategy      string           `yaml:"tsp_withdrawal_strategy" json:"tsp_withdrawal_strategy"`
 	TSPWithdrawalTargetMonthly *decimal.Decimal `yaml:"tsp_withdrawal_target_monthly,omitempty" json:"tsp_withdrawal_target_monthly,omitempty"`
 	TSPWithdrawalRate          *decimal.Decimal `yaml:"tsp_withdrawal_rate,omitempty" json:"tsp_withdrawal_rate,omitempty"`
+
+	// Annuity-specific configuration (used when tsp_withdrawal_strategy is "fixed_annuity")
+	AnnuityPremiumPercent  *decimal.Decimal `yaml:"annuity_premium_percent,omitempty" json:"annuity_premium_percent,omitempty"`   // Percentage of TSP to convert (e.g., 1.0 for 100%, 0.5 for 50%)
+	AnnuityPayoutRate      *decimal.Decimal `yaml:"annuity_payout_rate,omitempty" json:"annuity_payout_rate,omitempty"`           // Annual payout rate (e.g., 0.055 for 5.5%)
+	AnnuityCOLARate        *decimal.Decimal `yaml:"annuity_cola_rate,omitempty" json:"annuity_cola_rate,omitempty"`               // Annual COLA adjustment (e.g., 0.02 for 2%, 0 for none)
+	AnnuitySurvivorPercent *decimal.Decimal `yaml:"annuity_survivor_percent,omitempty" json:"annuity_survivor_percent,omitempty"` // Survivor payout (1.0 = 100%, 0.5 = 50%, 0 = none)
+	AnnuityGuaranteedYears *int             `yaml:"annuity_guaranteed_years,omitempty" json:"annuity_guaranteed_years,omitempty"` // Guaranteed payment period (e.g., 10)
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for RetirementScenario
@@ -59,6 +66,11 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 		TSPWithdrawalStrategy      string    `yaml:"tsp_withdrawal_strategy"`
 		TSPWithdrawalTargetMonthly *string   `yaml:"tsp_withdrawal_target_monthly,omitempty"`
 		TSPWithdrawalRate          *string   `yaml:"tsp_withdrawal_rate,omitempty"`
+		AnnuityPremiumPercent      *string   `yaml:"annuity_premium_percent,omitempty"`
+		AnnuityPayoutRate          *string   `yaml:"annuity_payout_rate,omitempty"`
+		AnnuityCOLARate            *string   `yaml:"annuity_cola_rate,omitempty"`
+		AnnuitySurvivorPercent     *string   `yaml:"annuity_survivor_percent,omitempty"`
+		AnnuityGuaranteedYears     *int      `yaml:"annuity_guaranteed_years,omitempty"`
 	}
 
 	var aux Alias
@@ -71,6 +83,7 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 	rs.RetirementDate = aux.RetirementDate
 	rs.SSStartAge = aux.SSStartAge
 	rs.TSPWithdrawalStrategy = aux.TSPWithdrawalStrategy
+	rs.AnnuityGuaranteedYears = aux.AnnuityGuaranteedYears
 
 	// Convert string decimal fields to *decimal.Decimal
 	if aux.TSPWithdrawalTargetMonthly != nil {
@@ -87,6 +100,39 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 			return err
 		}
 		rs.TSPWithdrawalRate = &val
+	}
+
+	// Convert annuity decimal fields
+	if aux.AnnuityPremiumPercent != nil {
+		val, err := decimal.NewFromString(*aux.AnnuityPremiumPercent)
+		if err != nil {
+			return err
+		}
+		rs.AnnuityPremiumPercent = &val
+	}
+
+	if aux.AnnuityPayoutRate != nil {
+		val, err := decimal.NewFromString(*aux.AnnuityPayoutRate)
+		if err != nil {
+			return err
+		}
+		rs.AnnuityPayoutRate = &val
+	}
+
+	if aux.AnnuityCOLARate != nil {
+		val, err := decimal.NewFromString(*aux.AnnuityCOLARate)
+		if err != nil {
+			return err
+		}
+		rs.AnnuityCOLARate = &val
+	}
+
+	if aux.AnnuitySurvivorPercent != nil {
+		val, err := decimal.NewFromString(*aux.AnnuitySurvivorPercent)
+		if err != nil {
+			return err
+		}
+		rs.AnnuitySurvivorPercent = &val
 	}
 
 	return nil

@@ -225,14 +225,41 @@ func (ip *InputParser) validateRetirementScenario(_ string, scenario *domain.Ret
 	if scenario.SSStartAge < 62 || scenario.SSStartAge > 70 {
 		return fmt.Errorf("social security start age must be between 62 and 70")
 	}
-	if scenario.TSPWithdrawalStrategy != "4_percent_rule" && scenario.TSPWithdrawalStrategy != "need_based" && scenario.TSPWithdrawalStrategy != "variable_percentage" {
-		return fmt.Errorf("TSP withdrawal strategy must be '4_percent_rule', 'need_based', or 'variable_percentage'")
+	if scenario.TSPWithdrawalStrategy != "4_percent_rule" &&
+		scenario.TSPWithdrawalStrategy != "need_based" &&
+		scenario.TSPWithdrawalStrategy != "variable_percentage" &&
+		scenario.TSPWithdrawalStrategy != "fixed_annuity" {
+		return fmt.Errorf("TSP withdrawal strategy must be '4_percent_rule', 'need_based', 'variable_percentage', or 'fixed_annuity'")
 	}
 	if scenario.TSPWithdrawalStrategy == "need_based" && scenario.TSPWithdrawalTargetMonthly == nil {
 		return fmt.Errorf("TSP withdrawal target monthly is required for need_based strategy")
 	}
 	if scenario.TSPWithdrawalStrategy == "variable_percentage" && scenario.TSPWithdrawalRate == nil {
 		return fmt.Errorf("TSP withdrawal rate is required for variable_percentage strategy")
+	}
+	if scenario.TSPWithdrawalStrategy == "fixed_annuity" {
+		// Validate annuity-specific fields
+		if scenario.AnnuityPayoutRate == nil {
+			return fmt.Errorf("annuity_payout_rate is required for fixed_annuity strategy")
+		}
+		if scenario.AnnuityPayoutRate.LessThanOrEqual(decimal.Zero) || scenario.AnnuityPayoutRate.GreaterThan(decimal.NewFromFloat(0.20)) {
+			return fmt.Errorf("annuity_payout_rate must be between 0 and 0.20 (0%% and 20%%)")
+		}
+		if scenario.AnnuityPremiumPercent != nil {
+			if scenario.AnnuityPremiumPercent.LessThanOrEqual(decimal.Zero) || scenario.AnnuityPremiumPercent.GreaterThan(decimal.NewFromInt(1)) {
+				return fmt.Errorf("annuity_premium_percent must be between 0 and 1.0 (0%% and 100%%)")
+			}
+		}
+		if scenario.AnnuityCOLARate != nil {
+			if scenario.AnnuityCOLARate.LessThan(decimal.Zero) || scenario.AnnuityCOLARate.GreaterThan(decimal.NewFromFloat(0.10)) {
+				return fmt.Errorf("annuity_cola_rate must be between 0 and 0.10 (0%% and 10%%)")
+			}
+		}
+		if scenario.AnnuitySurvivorPercent != nil {
+			if scenario.AnnuitySurvivorPercent.LessThan(decimal.Zero) || scenario.AnnuitySurvivorPercent.GreaterThan(decimal.NewFromInt(1)) {
+				return fmt.Errorf("annuity_survivor_percent must be between 0 and 1.0 (0%% and 100%%)")
+			}
+		}
 	}
 	if scenario.TSPWithdrawalTargetMonthly != nil && scenario.TSPWithdrawalTargetMonthly.LessThanOrEqual(decimal.Zero) {
 		return fmt.Errorf("TSP withdrawal target monthly must be positive")

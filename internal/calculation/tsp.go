@@ -24,6 +24,39 @@ func (ce *CalculationEngine) createTSPStrategy(scenario *domain.RetirementScenar
 		}
 		// Fallback to 4% rule if rate not specified
 		return NewFourPercentRule(initialBalance, inflationRate)
+	case "fixed_annuity":
+		// Calculate annuity premium (portion of TSP to convert)
+		premiumPercent := decimal.NewFromInt(1) // Default: 100% of TSP
+		if scenario.AnnuityPremiumPercent != nil {
+			premiumPercent = *scenario.AnnuityPremiumPercent
+		}
+		premium := initialBalance.Mul(premiumPercent)
+
+		// Get annuity payout rate (default: 5.5% annual payout)
+		payoutRate := decimal.NewFromFloat(0.055)
+		if scenario.AnnuityPayoutRate != nil {
+			payoutRate = *scenario.AnnuityPayoutRate
+		}
+
+		// Get COLA rate (default: 0 for fixed payment)
+		colaRate := decimal.Zero
+		if scenario.AnnuityCOLARate != nil {
+			colaRate = *scenario.AnnuityCOLARate
+		}
+
+		// Get survivor benefit percentage (default: 100%)
+		survivorPercent := decimal.NewFromInt(1)
+		if scenario.AnnuitySurvivorPercent != nil {
+			survivorPercent = *scenario.AnnuitySurvivorPercent
+		}
+
+		// Get guaranteed years (default: 10 years certain)
+		guaranteedYears := 10
+		if scenario.AnnuityGuaranteedYears != nil {
+			guaranteedYears = *scenario.AnnuityGuaranteedYears
+		}
+
+		return NewFixedAnnuity(premium, payoutRate, colaRate, survivorPercent, guaranteedYears)
 	default:
 		// Default to 4% rule
 		return NewFourPercentRule(initialBalance, inflationRate)
