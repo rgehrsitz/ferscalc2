@@ -85,7 +85,6 @@ coverage.html
 # Air live reload
 tmp/ 
 
-cli
 example_config_comprehensive.yaml
 
 # Crush directory
