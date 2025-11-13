@@ -322,11 +322,22 @@ type TaxBracket struct {
 
 // StateLocalTaxConfig contains state and local tax configuration
 type StateLocalTaxConfig struct {
-	// Pennsylvania state tax (flat rate)
-	PennsylvaniaRate decimal.Decimal `yaml:"pennsylvania_rate" json:"pennsylvania_rate"` // Default: 0.0307 (3.07%)
+	// State selection (e.g., "Pennsylvania", "New Jersey")
+	State string `yaml:"state" json:"state"` // Default: "Pennsylvania"
 
-	// Upper Makefield Township EIT (local tax)
-	UpperMakefieldEITRate decimal.Decimal `yaml:"upper_makefield_eit_rate" json:"upper_makefield_eit_rate"` // Default: 0.01 (1% on earned income)
+	// Pennsylvania state tax (flat rate)
+	PennsylvaniaRate decimal.Decimal `yaml:"pennsylvania_rate,omitempty" json:"pennsylvania_rate,omitempty"` // Default: 0.0307 (3.07%)
+
+	// Pennsylvania local tax (Upper Makefield Township EIT)
+	UpperMakefieldEITRate decimal.Decimal `yaml:"upper_makefield_eit_rate,omitempty" json:"upper_makefield_eit_rate,omitempty"` // Default: 0.01 (1% on earned income)
+
+	// New Jersey state tax (graduated brackets)
+	NewJerseyBracketsMFJ    []TaxBracket    `yaml:"new_jersey_brackets_mfj,omitempty" json:"new_jersey_brackets_mfj,omitempty"`
+	NewJerseyBracketsSingle []TaxBracket    `yaml:"new_jersey_brackets_single,omitempty" json:"new_jersey_brackets_single,omitempty"`
+	NewJerseyRetirementExclusionMFJ    decimal.Decimal `yaml:"new_jersey_retirement_exclusion_mfj,omitempty" json:"new_jersey_retirement_exclusion_mfj,omitempty"` // Default: 100000 (max exclusion for MFJ)
+	NewJerseyRetirementExclusionSingle decimal.Decimal `yaml:"new_jersey_retirement_exclusion_single,omitempty" json:"new_jersey_retirement_exclusion_single,omitempty"` // Default: 75000 (max exclusion for single)
+	NewJerseyRetirementIncomeThreshold decimal.Decimal `yaml:"new_jersey_retirement_income_threshold,omitempty" json:"new_jersey_retirement_income_threshold,omitempty"` // Default: 100000 (phase-out starts)
+	NewJerseyRetirementIncomeLimit     decimal.Decimal `yaml:"new_jersey_retirement_income_limit,omitempty" json:"new_jersey_retirement_income_limit,omitempty"` // Default: 150000 (no exclusion above)
 }
 
 // FICATaxConfig contains FICA tax configuration (updated annually)

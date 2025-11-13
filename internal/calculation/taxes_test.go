@@ -151,7 +151,8 @@ func TestPennsylvaniaTaxCalculation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tax := calculator.CalculateTax(tt.income, tt.isRetired)
+			// Use default ages and MFJ filing status for PA tests
+			tax := calculator.CalculateTax(tt.income, tt.isRetired, "mfj", 60, 58)
 
 			// Allow for rounding differences (within $1)
 			difference := tax.Sub(tt.expectedTax).Abs()

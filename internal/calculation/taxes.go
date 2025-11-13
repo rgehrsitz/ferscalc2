@@ -14,9 +14,16 @@ import (
 //    - Standard deduction: $30,000 (2025 MFJ estimate)
 //    - Additional standard deduction for age 65+: $1,550 per person
 //
-// 2. Pennsylvania State Tax: 3.07% flat tax rate (no inflation adjustment)
+// 2. State Tax:
+//    - Pennsylvania: 3.07% flat tax rate (no inflation adjustment)
+//      * Exempts retirement income (FERS pension, TSP, Social Security)
+//    - New Jersey: Graduated rates 1.4% - 10.75%
+//      * Social Security is NOT taxed
+//      * Retirement income exclusion up to $100K (MFJ) / $75K (single) if income ≤ $100K
+//      * Partial exclusion (50% or 25%) for incomes between $100K-$150K
 //
-// 3. Upper Makefield EIT: 1% flat tax on earned income only
+// 3. Local Tax (Pennsylvania only):
+//    - Upper Makefield EIT: 1% flat tax on earned income only
 //    - Does not apply to retirement income (pensions, TSP, SS)
 //
 // 4. Medicare Part B & IRMAA: Placeholder implementation
@@ -24,6 +31,11 @@ import (
 //    - IRMAA surcharge: $200/month placeholder (needs AGI-based calculation)
 //
 // TODO: Consider adding inflation indexing for long-term projections
+
+// StateTaxCalculator is an interface for state-specific tax calculations
+type StateTaxCalculator interface {
+	CalculateTax(income domain.TaxableIncome, isRetired bool, filingStatus string, age1, age2 int) decimal.Decimal
+}
 
 // TaxBracket represents a federal tax bracket
 type TaxBracket struct {
@@ -144,11 +156,11 @@ func NewPennsylvaniaTaxCalculatorWithConfig(config domain.StateLocalTaxConfig) *
 	}
 }
 
-// CalculatePennsylvaniaStateIncomeTax calculates Pennsylvania state income tax
+// CalculateTax calculates Pennsylvania state income tax
 // PA has a flat tax rate (currently 3.07%)
 // Key Exclusions: PA does NOT tax FERS pensions, TSP withdrawals, or Social Security benefits
 // Only earned income (salary) is typically taxed
-func (ptc *PennsylvaniaTaxCalculator) CalculateTax(income domain.TaxableIncome, isRetired bool) decimal.Decimal {
+func (ptc *PennsylvaniaTaxCalculator) CalculateTax(income domain.TaxableIncome, isRetired bool, filingStatus string, age1, age2 int) decimal.Decimal {
 	if isRetired {
 		// PA exempts retirement income: pensions, TSP, Social Security
 		// Only tax earned income (wages) and interest income
@@ -158,6 +170,149 @@ func (ptc *PennsylvaniaTaxCalculator) CalculateTax(income domain.TaxableIncome, 
 
 	// While working: tax wages at configured rate
 	return income.WageIncome.Mul(ptc.Rate)
+}
+
+// NewJerseyTaxCalculator handles New Jersey state tax calculations
+type NewJerseyTaxCalculator struct {
+	BracketsMFJ                []TaxBracket
+	BracketsSingle             []TaxBracket
+	RetirementExclusionMFJ     decimal.Decimal
+	RetirementExclusionSingle  decimal.Decimal
+	RetirementIncomeThreshold  decimal.Decimal // Phase-out starts at this income level
+	RetirementIncomeLimit      decimal.Decimal // No exclusion above this income level
+}
+
+// NewNewJerseyTaxCalculator creates a new New Jersey tax calculator with default 2025 values
+func NewNewJerseyTaxCalculator() *NewJerseyTaxCalculator {
+	return &NewJerseyTaxCalculator{
+		BracketsMFJ: []TaxBracket{
+			{decimal.Zero, decimal.NewFromInt(20000), decimal.NewFromFloat(0.014)},
+			{decimal.NewFromInt(20001), decimal.NewFromInt(50000), decimal.NewFromFloat(0.0175)},
+			{decimal.NewFromInt(50001), decimal.NewFromInt(70000), decimal.NewFromFloat(0.0245)},
+			{decimal.NewFromInt(70001), decimal.NewFromInt(80000), decimal.NewFromFloat(0.035)},
+			{decimal.NewFromInt(80001), decimal.NewFromInt(150000), decimal.NewFromFloat(0.05525)},
+			{decimal.NewFromInt(150001), decimal.NewFromInt(500000), decimal.NewFromFloat(0.0637)},
+			{decimal.NewFromInt(500001), decimal.NewFromInt(1000000), decimal.NewFromFloat(0.0897)},
+			{decimal.NewFromInt(1000001), decimal.NewFromInt(999999999), decimal.NewFromFloat(0.1075)},
+		},
+		BracketsSingle: []TaxBracket{
+			{decimal.Zero, decimal.NewFromInt(20000), decimal.NewFromFloat(0.014)},
+			{decimal.NewFromInt(20001), decimal.NewFromInt(35000), decimal.NewFromFloat(0.0175)},
+			{decimal.NewFromInt(35001), decimal.NewFromInt(40000), decimal.NewFromFloat(0.035)},
+			{decimal.NewFromInt(40001), decimal.NewFromInt(75000), decimal.NewFromFloat(0.05525)},
+			{decimal.NewFromInt(75001), decimal.NewFromInt(500000), decimal.NewFromFloat(0.0637)},
+			{decimal.NewFromInt(500001), decimal.NewFromInt(1000000), decimal.NewFromFloat(0.0897)},
+			{decimal.NewFromInt(1000001), decimal.NewFromInt(999999999), decimal.NewFromFloat(0.1075)},
+		},
+		RetirementExclusionMFJ:    decimal.NewFromInt(100000), // Max exclusion for MFJ
+		RetirementExclusionSingle: decimal.NewFromInt(75000),  // Max exclusion for single
+		RetirementIncomeThreshold: decimal.NewFromInt(100000), // Phase-out starts
+		RetirementIncomeLimit:     decimal.NewFromInt(150000), // No exclusion above
+	}
+}
+
+// NewNewJerseyTaxCalculatorWithConfig creates a new New Jersey tax calculator with configurable values
+func NewNewJerseyTaxCalculatorWithConfig(config domain.StateLocalTaxConfig) *NewJerseyTaxCalculator {
+	calc := NewNewJerseyTaxCalculator() // Start with defaults
+	
+	// Override with config values if provided
+	if len(config.NewJerseyBracketsMFJ) > 0 {
+		calc.BracketsMFJ = make([]TaxBracket, len(config.NewJerseyBracketsMFJ))
+		for i, b := range config.NewJerseyBracketsMFJ {
+			calc.BracketsMFJ[i] = TaxBracket{Min: b.Min, Max: b.Max, Rate: b.Rate}
+		}
+	}
+	if len(config.NewJerseyBracketsSingle) > 0 {
+		calc.BracketsSingle = make([]TaxBracket, len(config.NewJerseyBracketsSingle))
+		for i, b := range config.NewJerseyBracketsSingle {
+			calc.BracketsSingle[i] = TaxBracket{Min: b.Min, Max: b.Max, Rate: b.Rate}
+		}
+	}
+	if !config.NewJerseyRetirementExclusionMFJ.IsZero() {
+		calc.RetirementExclusionMFJ = config.NewJerseyRetirementExclusionMFJ
+	}
+	if !config.NewJerseyRetirementExclusionSingle.IsZero() {
+		calc.RetirementExclusionSingle = config.NewJerseyRetirementExclusionSingle
+	}
+	if !config.NewJerseyRetirementIncomeThreshold.IsZero() {
+		calc.RetirementIncomeThreshold = config.NewJerseyRetirementIncomeThreshold
+	}
+	if !config.NewJerseyRetirementIncomeLimit.IsZero() {
+		calc.RetirementIncomeLimit = config.NewJerseyRetirementIncomeLimit
+	}
+	
+	return calc
+}
+
+// CalculateTax calculates New Jersey state income tax
+// NJ has graduated tax brackets (1.4% - 10.75%)
+// Key features:
+// - Social Security benefits are NOT taxed
+// - Retirement income (pensions, TSP) can be partially excluded based on total income and age
+// - Exclusion: up to $100,000 (MFJ) or $75,000 (single) if total income ≤ $100,000
+// - Phase-out: 50% exclusion if income $100,001-$125,000, 25% if $125,001-$150,000
+// - No exclusion if income > $150,000
+func (njtc *NewJerseyTaxCalculator) CalculateTax(income domain.TaxableIncome, isRetired bool, filingStatus string, age1, age2 int) decimal.Decimal {
+	// Determine which brackets to use
+	brackets := njtc.BracketsMFJ
+	maxExclusion := njtc.RetirementExclusionMFJ
+	if filingStatus == "single" {
+		brackets = njtc.BracketsSingle
+		maxExclusion = njtc.RetirementExclusionSingle
+	}
+
+	// Calculate total income for NJ (before any exclusions)
+	// Note: Salary and WageIncome are typically the same, use the larger to avoid double-counting
+	wages := decimal.Max(income.Salary, income.WageIncome)
+	totalIncome := wages.
+		Add(income.FERSPension).
+		Add(income.TSPWithdrawalsTrad).
+		Add(income.InterestIncome).
+		Add(income.OtherTaxableIncome)
+	// Note: Social Security is NOT included in taxable income for NJ
+	
+	// Calculate retirement income exclusion (only if retired and age 62+)
+	var retirementExclusion decimal.Decimal
+	if isRetired && (age1 >= 62 || age2 >= 62) {
+		retirementIncome := income.FERSPension.Add(income.TSPWithdrawalsTrad)
+		
+		// Determine exclusion percentage based on total income
+		var exclusionPercent decimal.Decimal
+		if totalIncome.LessThanOrEqual(njtc.RetirementIncomeThreshold) {
+			exclusionPercent = decimal.NewFromInt(1) // 100%
+		} else if totalIncome.LessThanOrEqual(decimal.NewFromInt(125000)) {
+			exclusionPercent = decimal.NewFromFloat(0.5) // 50%
+		} else if totalIncome.LessThanOrEqual(njtc.RetirementIncomeLimit) {
+			exclusionPercent = decimal.NewFromFloat(0.25) // 25%
+		} else {
+			exclusionPercent = decimal.Zero // 0%
+		}
+		
+		// Apply exclusion, capped at maximum
+		retirementExclusion = decimal.Min(retirementIncome, maxExclusion).Mul(exclusionPercent)
+	}
+	
+	// Calculate NJ taxable income
+	njTaxableIncome := totalIncome.Sub(retirementExclusion)
+	// Social Security (TaxableSSBenefits) is NOT added - NJ doesn't tax SS
+	
+	if njTaxableIncome.LessThanOrEqual(decimal.Zero) {
+		return decimal.Zero
+	}
+	
+	// Apply graduated tax brackets
+	var totalTax decimal.Decimal
+	for _, bracket := range brackets {
+		if njTaxableIncome.LessThanOrEqual(bracket.Min) {
+			break
+		}
+		incomeInBracket := decimal.Min(njTaxableIncome, bracket.Max).Sub(bracket.Min)
+		if incomeInBracket.GreaterThan(decimal.Zero) {
+			totalTax = totalTax.Add(incomeInBracket.Mul(bracket.Rate))
+		}
+	}
+	
+	return totalTax
 }
 
 // UpperMakefieldEITCalculator handles Upper Makefield Township local tax calculations
@@ -279,7 +434,7 @@ func (fc *FICACalculator) CalculateFICAWithProration(wages decimal.Decimal, tota
 // ComprehensiveTaxCalculator handles all tax calculations
 type ComprehensiveTaxCalculator struct {
 	FederalTaxCalc *FederalTaxCalculator
-	StateTaxCalc   *PennsylvaniaTaxCalculator
+	StateTaxCalc   StateTaxCalculator
 	LocalTaxCalc   *UpperMakefieldEITCalculator
 	FICATaxCalc    *FICACalculator
 	SSTaxCalc      *SSTaxCalculator
@@ -298,9 +453,21 @@ func NewComprehensiveTaxCalculator() *ComprehensiveTaxCalculator {
 
 // NewComprehensiveTaxCalculatorWithConfig creates a new comprehensive tax calculator with configurable values
 func NewComprehensiveTaxCalculatorWithConfig(federalRules domain.FederalRules) *ComprehensiveTaxCalculator {
+	// Determine which state tax calculator to use
+	var stateTaxCalc StateTaxCalculator
+	switch federalRules.StateLocalTaxConfig.State {
+	case "New Jersey", "NJ":
+		stateTaxCalc = NewNewJerseyTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig)
+	case "Pennsylvania", "PA", "":
+		stateTaxCalc = NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig)
+	default:
+		// Default to Pennsylvania if unknown state
+		stateTaxCalc = NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig)
+	}
+	
 	return &ComprehensiveTaxCalculator{
 		FederalTaxCalc: NewFederalTaxCalculator(federalRules.FederalTaxConfig),
-		StateTaxCalc:   NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig),
+		StateTaxCalc:   stateTaxCalc,
 		LocalTaxCalc:   NewUpperMakefieldEITCalculatorWithConfig(federalRules.StateLocalTaxConfig),
 		FICATaxCalc:    NewFICACalculator(federalRules.FICATaxConfig),
 		SSTaxCalc:      NewSSTaxCalculator(),
@@ -312,8 +479,8 @@ func (ctc *ComprehensiveTaxCalculator) CalculateTotalTaxes(taxableIncome domain.
 	// Calculate federal tax with inflation-adjusted brackets
 	federalTax := ctc.calculateFederalTaxWithInflation(taxableIncome, agePersonA, agePersonB)
 
-	// Calculate state tax
-	stateTax := ctc.StateTaxCalc.CalculateTax(taxableIncome, isRetired)
+	// Calculate state tax (filingStatus is "mfj" for this simple interface)
+	stateTax := ctc.StateTaxCalc.CalculateTax(taxableIncome, isRetired, "mfj", agePersonA, agePersonB)
 
 	// Calculate local tax (only on earned income)
 	localTax := ctc.LocalTaxCalc.CalculateEIT(workingIncome, isRetired)
@@ -732,7 +899,9 @@ func (ce *CalculationEngine) calculateTransitionYearTaxes(ctx taxComputationCont
 	}
 
 	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors)
-	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, false)
+	ageA := ctx.personA.Age(ctx.projectionDate)
+	ageB := ctx.personB.Age(ctx.projectionDate)
+	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, false, ctx.filingStatus, ageA, ageB)
 	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(totalWorkingIncome, false)
 	personAFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.workingIncomeA, totalWorkingIncome)
 	personBFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.workingIncomeB, totalWorkingIncome)
@@ -780,7 +949,9 @@ func (ce *CalculationEngine) calculateRetirementYearTaxes(ctx taxComputationCont
 	}
 
 	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors)
-	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, true)
+	ageA := ctx.personA.Age(ctx.projectionDate)
+	ageB := ctx.personB.Age(ctx.projectionDate)
+	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, true, ctx.filingStatus, ageA, ageB)
 	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(decimal.Zero, true)
 	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
 
@@ -805,7 +976,9 @@ func (ce *CalculationEngine) calculateWorkingYearTaxes(ctx taxComputationContext
 	currentTaxableIncome := CalculateCurrentTaxableIncome(ctx.currentSalaryA, ctx.currentSalaryB)
 
 	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(currentTaxableIncome, ctx.filingStatus, ctx.seniors)
-	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(currentTaxableIncome, false)
+	ageA := ctx.personA.Age(ctx.projectionDate)
+	ageB := ctx.personB.Age(ctx.projectionDate)
+	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(currentTaxableIncome, false, ctx.filingStatus, ageA, ageB)
 	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(ctx.combinedCurrentSalary(), false)
 
 	totalCurrentSalary := ctx.currentSalaryA.Add(ctx.currentSalaryB)
