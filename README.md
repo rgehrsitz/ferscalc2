@@ -8,7 +8,9 @@ A comprehensive retirement planning calculator for Federal Employees Retirement 
 - **TSP Modeling**: Support for both Traditional and Roth TSP accounts with multiple withdrawal strategies and manual allocations
 - **TSP Lifecycle Fund Limitation**: For Monte Carlo simulations, manual TSP allocations are recommended over lifecycle funds for proper market variability
 - **Social Security Integration**: Full benefit calculations with 2025 WEP/GPO repeal implementation (2025 wage base: $176,100)
-- **Tax Modeling**: Complete federal, state (Pennsylvania), and local tax calculations
+- **Tax Modeling**: Complete federal and state tax calculations
+  - **Pennsylvania (PA)**: 3.07% flat rate with full retirement income exemption
+  - **New Jersey (NJ)**: Graduated rates (1.4%-10.75%) with retirement income exclusions for age 62+
 - **Multiple Scenarios**: Compare multiple retirement scenarios simultaneously
 - **Long-term Projections**: 25+ year projections with COLA adjustments
 - **Multiple Output Formats**: Console, HTML, JSON, and CSV reports
@@ -20,7 +22,9 @@ A comprehensive retirement planning calculator for Federal Employees Retirement 
 - **Social Security Fairness Act (2025)**: WEP/GPO repeal implementation
 - **SECURE 2.0 Act**: Updated RMD ages (73 for 1951-1959, 75 for 1960+)
 - **2025 Tax Brackets**: Current federal tax calculations
-- **Pennsylvania Tax Rules**: State-specific retirement income exemptions
+- **State Tax Rules**: 
+  - **Pennsylvania**: Full exemption of retirement income (pension, TSP, Social Security)
+  - **New Jersey**: Social Security exempt, partial retirement income exclusions based on age and income level
 
 ## Installation
 
@@ -199,9 +203,20 @@ global_assumptions:
   cola_general_rate: 0.025
   projection_years: 25
   current_location:
-    state: "Pennsylvania"
+    state: "Pennsylvania"  # or "New Jersey" - determines which state tax rules apply
     county: "Bucks"
     municipality: "Upper Makefield Township"
+  
+  # Optional: Detailed state tax configuration for New Jersey
+  federal_rules:
+    state_local_tax:
+      state: "New Jersey"
+      # NJ-specific settings (uses defaults if not specified)
+      new_jersey_retirement_exclusion_mfj: "100000"
+      new_jersey_retirement_exclusion_single: "75000"
+      new_jersey_retirement_income_threshold: "100000"
+      new_jersey_retirement_income_limit: "150000"
+      # NJ tax brackets are built-in (1.4% - 10.75% graduated rates)
 
 scenarios:
   - name: "Early Retirement 2025"
@@ -371,8 +386,18 @@ Result: 84% success rate, moderate risk assessment
 ### Tax Calculations
 
 - **Federal**: 2025 tax brackets with standard deductions
-- **Pennsylvania**: 3.07% flat rate, retirement income exempt
-- **Local**: Earned Income Tax (EIT) only on wages
+- **State Taxes**:
+  - **Pennsylvania**: 3.07% flat rate
+    - Full exemption for retirement income (FERS pension, TSP, Social Security)
+    - Only earned wages are taxed
+  - **New Jersey**: Graduated rates (1.4% - 10.75%)
+    - Social Security benefits are NOT taxed
+    - Retirement income exclusion for age 62+:
+      - Up to $100,000 (married) / $75,000 (single) if total income ≤ $100,000
+      - 50% exclusion for income $100,001-$125,000
+      - 25% exclusion for income $125,001-$150,000
+      - No exclusion above $150,000
+- **Local**: Pennsylvania Earned Income Tax (EIT) on wages only (not applicable in NJ)
 - **FICA**: Social Security and Medicare taxes on earned income only
 
 ## Project Structure
@@ -437,10 +462,11 @@ For issues, questions, or contributions, please use the GitHub issue tracker or 
 - [x] Monte Carlo simulation for TSP returns
 - [x] Historical data integration
 - [x] Interactive HTML reports with charts and visualizations
+- [x] State tax support (Pennsylvania and New Jersey)
 - [ ] TSP lifecycle fund support for Monte Carlo simulations
 - [ ] Enhanced withdrawal strategies (floor-ceiling, bond tent)
 - [ ] Web interface
-- [ ] Additional state tax support
+- [ ] Additional state tax support (other states beyond PA and NJ)
 - [ ] Medicare Part B premium calculations
 - [ ] Survivor benefit optimization
 - [ ] Export to financial planning software
