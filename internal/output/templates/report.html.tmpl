@@ -91,62 +91,35 @@ h1 { margin:0 0 4px 0; font-weight:400; }
   {{range $sIdx, $scenario := .Scenarios}}
   <section style="background:#fcfcfd;">
     <h3 style="margin-top:6px;">{{$scenario.Name}}</h3>
-    {{ $now := index $scenario.Projection 0 }}
-    {{ if ge (len $scenario.Projection) 5 }}
-      {{ $then := index $scenario.Projection 4 }}
+    {{ $now := index $scenario.Projection $scenario.LastBothEmployedIndex }}
+    {{ $thenAny := index $scenario.Projection $scenario.FirstAnyRetiredIndex }}
+    {{ $thenBoth := index $scenario.Projection $scenario.FirstBothRetiredIndex }}
       <table class="table">
-        <thead><tr><th>Component</th><th>Now (Year {{$now.Date.Year}})</th><th>Post-Retirement (Year {{$then.Date.Year}})</th></tr></thead>
+        <thead><tr><th>Component</th><th>Last Year Both Employed (Year {{$now.Date.Year}})</th><th>First Full Year Any Retired (Year {{$thenAny.Date.Year}})</th><th>First Full Year Both Retired (Year {{$thenBoth.Date.Year}})</th></tr></thead>
         <tbody>
-          <tr><td>Salary — Person A</td><td>{{curr $now.SalaryPersonA}}</td><td>{{curr $then.SalaryPersonA}}</td></tr>
-          <tr><td>Salary — Person B</td><td>{{curr $now.SalaryPersonB}}</td><td>{{curr $then.SalaryPersonB}}</td></tr>
-          <tr><td>Pension — Person A</td><td>{{curr $now.PensionPersonA}}</td><td>{{curr $then.PensionPersonA}}</td></tr>
-          <tr><td>Pension — Person B</td><td>{{curr $now.PensionPersonB}}</td><td>{{curr $then.PensionPersonB}}</td></tr>
-          <tr><td>TSP Withdrawals — Person A</td><td>{{curr $now.TSPWithdrawalPersonA}}</td><td>{{curr $then.TSPWithdrawalPersonA}}</td></tr>
-          <tr><td>TSP Withdrawals — Person B</td><td>{{curr $now.TSPWithdrawalPersonB}}</td><td>{{curr $then.TSPWithdrawalPersonB}}</td></tr>
-          <tr><td>Social Security — Person A</td><td>{{curr $now.SSBenefitPersonA}}</td><td>{{curr $then.SSBenefitPersonA}}</td></tr>
-          <tr><td>Social Security — Person B</td><td>{{curr $now.SSBenefitPersonB}}</td><td>{{curr $then.SSBenefitPersonB}}</td></tr>
-          <tr><td>FERSSupplement — Person A</td><td>{{curr $now.FERSSupplementPersonA}}</td><td>{{curr $then.FERSSupplementPersonA}}</td></tr>
-          <tr><td>FERSSupplement — Person B</td><td>{{curr $now.FERSSupplementPersonB}}</td><td>{{curr $then.FERSSupplementPersonB}}</td></tr>
-          <tr><td><strong>Total Gross Income</strong></td><td><strong>{{curr $now.TotalGrossIncome}}</strong></td><td><strong>{{curr $then.TotalGrossIncome}}</strong></td></tr>
-          <tr><td>Federal Tax (total)</td><td>{{curr $now.FederalTax}}</td><td>{{curr $then.FederalTax}}</td></tr>
-          <tr><td>State Tax (total)</td><td>{{curr $now.StateTax}}</td><td>{{curr $then.StateTax}}</td></tr>
-          <tr><td>FICA</td><td>{{curr $now.FICATax}}</td><td>{{curr $then.FICATax}}</td></tr>
-          <tr><td>TSP Contributions</td><td>{{curr $now.TSPContributions}}</td><td>{{curr $then.TSPContributions}}</td></tr>
-          <tr><td>FEHB Premium</td><td>{{curr $now.FEHBPremium}}</td><td>{{curr $then.FEHBPremium}}</td></tr>
-          <tr><td>Medicare Premium — Person A</td><td>{{curr $now.MedicarePremiumPersonA}}</td><td>{{curr $then.MedicarePremiumPersonA}}</td></tr>
-          <tr><td>Medicare Premium — Person B</td><td>{{curr $now.MedicarePremiumPersonB}}</td><td>{{curr $then.MedicarePremiumPersonB}}</td></tr>
-          <tr><td><strong>Total Deductions</strong></td><td><strong>{{curr $now.CalculateTotalDeductions}}</strong></td><td><strong>{{curr $then.CalculateTotalDeductions}}</strong></td></tr>
-          <tr><td><strong>Net Income</strong></td><td><strong>{{curr $now.NetIncome}}</strong></td><td><strong>{{curr $then.NetIncome}}</strong></td></tr>
+          <tr><td>Salary — Person A</td><td>{{curr $now.SalaryPersonA}}</td><td>{{curr $thenAny.SalaryPersonA}}</td><td>{{curr $thenBoth.SalaryPersonA}}</td></tr>
+          <tr><td>Salary — Person B</td><td>{{curr $now.SalaryPersonB}}</td><td>{{curr $thenAny.SalaryPersonB}}</td><td>{{curr $thenBoth.SalaryPersonB}}</td></tr>
+          <tr><td>Pension — Person A</td><td>{{curr $now.PensionPersonA}}</td><td>{{curr $thenAny.PensionPersonA}}</td><td>{{curr $thenBoth.PensionPersonA}}</td></tr>
+          <tr><td>Pension — Person B</td><td>{{curr $now.PensionPersonB}}</td><td>{{curr $thenAny.PensionPersonB}}</td><td>{{curr $thenBoth.PensionPersonB}}</td></tr>
+          <tr><td>TSP Withdrawals — Person A</td><td>{{curr $now.TSPWithdrawalPersonA}}</td><td>{{curr $thenAny.TSPWithdrawalPersonA}}</td><td>{{curr $thenBoth.TSPWithdrawalPersonA}}</td></tr>
+          <tr><td>TSP Withdrawals — Person B</td><td>{{curr $now.TSPWithdrawalPersonB}}</td><td>{{curr $thenAny.TSPWithdrawalPersonB}}</td><td>{{curr $thenBoth.TSPWithdrawalPersonB}}</td></tr>
+          <tr><td>Social Security — Person A</td><td>{{curr $now.SSBenefitPersonA}}</td><td>{{curr $thenAny.SSBenefitPersonA}}</td><td>{{curr $thenBoth.SSBenefitPersonA}}</td></tr>
+          <tr><td>Social Security — Person B</td><td>{{curr $now.SSBenefitPersonB}}</td><td>{{curr $thenAny.SSBenefitPersonB}}</td><td>{{curr $thenBoth.SSBenefitPersonB}}</td></tr>
+          <tr><td>FERSSupplement — Person A</td><td>{{curr $now.FERSSupplementPersonA}}</td><td>{{curr $thenAny.FERSSupplementPersonA}}</td><td>{{curr $thenBoth.FERSSupplementPersonA}}</td></tr>
+          <tr><td>FERSSupplement — Person B</td><td>{{curr $now.FERSSupplementPersonB}}</td><td>{{curr $thenAny.FERSSupplementPersonB}}</td><td>{{curr $thenBoth.FERSSupplementPersonB}}</td></tr>
+          <tr><td><strong>Total Gross Income</strong></td><td><strong>{{curr $now.TotalGrossIncome}}</strong></td><td><strong>{{curr $thenAny.TotalGrossIncome}}</strong></td><td><strong>{{curr $thenBoth.TotalGrossIncome}}</strong></td></tr>
+          <tr><td>Federal Tax (total)</td><td>{{curr $now.FederalTax}}</td><td>{{curr $thenAny.FederalTax}}</td><td>{{curr $thenBoth.FederalTax}}</td></tr>
+          <tr><td>State Tax (total)</td><td>{{curr $now.StateTax}}</td><td>{{curr $thenAny.StateTax}}</td><td>{{curr $thenBoth.StateTax}}</td></tr>
+          <tr><td>FICA</td><td>{{curr $now.FICATax}}</td><td>{{curr $thenAny.FICATax}}</td><td>{{curr $thenBoth.FICATax}}</td></tr>
+          <tr><td>TSP Contributions</td><td>{{curr $now.TSPContributions}}</td><td>{{curr $thenAny.TSPContributions}}</td><td>{{curr $thenBoth.TSPContributions}}</td></tr>
+          <tr><td>FEHB Premium</td><td>{{curr $now.FEHBPremium}}</td><td>{{curr $thenAny.FEHBPremium}}</td><td>{{curr $thenBoth.FEHBPremium}}</td></tr>
+          <tr><td>Medicare Premium — Person A</td><td>{{curr $now.MedicarePremiumPersonA}}</td><td>{{curr $thenAny.MedicarePremiumPersonA}}</td><td>{{curr $thenBoth.MedicarePremiumPersonA}}</td></tr>
+          <tr><td>Medicare Premium — Person B</td><td>{{curr $now.MedicarePremiumPersonB}}</td><td>{{curr $thenAny.MedicarePremiumPersonB}}</td><td>{{curr $thenBoth.MedicarePremiumPersonB}}</td></tr>
+          <tr><td><strong>Total Deductions</strong></td><td><strong>{{curr $now.CalculateTotalDeductions}}</strong></td><td><strong>{{curr $thenAny.CalculateTotalDeductions}}</strong></td><td><strong>{{curr $thenBoth.CalculateTotalDeductions}}</strong></td></tr>
+          <tr><td><strong>Net Income</strong></td><td><strong>{{curr $now.NetIncome}}</strong></td><td><strong>{{curr $thenAny.NetIncome}}</strong></td><td><strong>{{curr $thenBoth.NetIncome}}</strong></td></tr>
         </tbody>
       </table>
-    {{ else }}
-      {{ $then := index $scenario.Projection (len $scenario.Projection | minus1) }}
-      <table class="table">
-        <thead><tr><th>Component</th><th>Now (Year {{$now.Date.Year}})</th><th>Post-Retirement (Year {{$then.Date.Year}})</th></tr></thead>
-        <tbody>
-          <tr><td>Salary — Person A</td><td>{{curr $now.SalaryPersonA}}</td><td>{{curr $then.SalaryPersonA}}</td></tr>
-          <tr><td>Salary — Person B</td><td>{{curr $now.SalaryPersonB}}</td><td>{{curr $then.SalaryPersonB}}</td></tr>
-          <tr><td>Pension — Person A</td><td>{{curr $now.PensionPersonA}}</td><td>{{curr $then.PensionPersonA}}</td></tr>
-          <tr><td>Pension — Person B</td><td>{{curr $now.PensionPersonB}}</td><td>{{curr $then.PensionPersonB}}</td></tr>
-          <tr><td>TSP Withdrawals — Person A</td><td>{{curr $now.TSPWithdrawalPersonA}}</td><td>{{curr $then.TSPWithdrawalPersonA}}</td></tr>
-          <tr><td>TSP Withdrawals — Person B</td><td>{{curr $now.TSPWithdrawalPersonB}}</td><td>{{curr $then.TSPWithdrawalPersonB}}</td></tr>
-          <tr><td>Social Security — Person A</td><td>{{curr $now.SSBenefitPersonA}}</td><td>{{curr $then.SSBenefitPersonA}}</td></tr>
-          <tr><td>Social Security — Person B</td><td>{{curr $now.SSBenefitPersonB}}</td><td>{{curr $then.SSBenefitPersonB}}</td></tr>
-          <tr><td>FERSSupplement — Person A</td><td>{{curr $now.FERSSupplementPersonA}}</td><td>{{curr $then.FERSSupplementPersonA}}</td></tr>
-          <tr><td>FERSSupplement — Person B</td><td>{{curr $now.FERSSupplementPersonB}}</td><td>{{curr $then.FERSSupplementPersonB}}</td></tr>
-          <tr><td><strong>Total Gross Income</strong></td><td><strong>{{curr $now.TotalGrossIncome}}</strong></td><td><strong>{{curr $then.TotalGrossIncome}}</strong></td></tr>
-          <tr><td>Federal Tax (total)</td><td>{{curr $now.FederalTax}}</td><td>{{curr $then.FederalTax}}</td></tr>
-          <tr><td>State Tax (total)</td><td>{{curr $now.StateTax}}</td><td>{{curr $then.StateTax}}</td></tr>
-          <tr><td>FICA</td><td>{{curr $now.FICATax}}</td><td>{{curr $then.FICATax}}</td></tr>
-          <tr><td>TSP Contributions</td><td>{{curr $now.TSPContributions}}</td><td>{{curr $then.TSPContributions}}</td></tr>
-          <tr><td>FEHB Premium</td><td>{{curr $now.FEHBPremium}}</td><td>{{curr $then.FEHBPremium}}</td></tr>
-          <tr><td>Medicare Premium — Person A</td><td>{{curr $now.MedicarePremiumPersonA}}</td><td>{{curr $then.MedicarePremiumPersonA}}</td></tr>
-          <tr><td>Medicare Premium — Person B</td><td>{{curr $now.MedicarePremiumPersonB}}</td><td>{{curr $then.MedicarePremiumPersonB}}</td></tr>
-          <tr><td><strong>Total Deductions</strong></td><td><strong>{{curr $now.CalculateTotalDeductions}}</strong></td><td><strong>{{curr $then.CalculateTotalDeductions}}</strong></td></tr>
-          <tr><td><strong>Net Income</strong></td><td><strong>{{curr $now.NetIncome}}</strong></td><td><strong>{{curr $then.NetIncome}}</strong></td></tr>
-        </tbody>
-      </table>
-    {{ end }}
+    
 
     <div style="font-size:0.9em; color:#444; margin-top:8px;">
       <strong>Why the difference?</strong>

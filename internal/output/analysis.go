@@ -28,7 +28,8 @@ func AnalyzeScenarios(results *domain.ScenarioComparison) Recommendation {
 
 	// Use 2030 net income for comparison (typically 5+ years into retirement for most scenarios)
 	// This avoids comparing partial retirement years and provides meaningful long-term comparison
-	for _, sc := range results.Scenarios {
+	for i := range results.Scenarios {
+		sc := &results.Scenarios[i]
 		// Prefer the 2030 calendar year comparison if available
 		income := sc.NetIncome2030
 		if income.IsZero() {
@@ -40,6 +41,49 @@ func AnalyzeScenarios(results *domain.ScenarioComparison) Recommendation {
 				}
 			}
 		}
+
+		// Compute reference indices for the template comparisons:
+		// - Last year both persons have salary > 0
+		// - First year where either person has salary == 0 (first any retired full year)
+		// - First year where both salaries == 0 (first both retired full year)
+		lastBoth := -1
+		firstAny := -1
+		firstBoth := -1
+		for idx, y := range sc.Projection {
+			if y.SalaryPersonA.GreaterThan(decimal.Zero) && y.SalaryPersonB.GreaterThan(decimal.Zero) {
+				lastBoth = idx
+			}
+			if firstAny == -1 {
+				if y.SalaryPersonA.IsZero() || y.SalaryPersonB.IsZero() {
+					firstAny = idx
+				}
+			}
+			if firstBoth == -1 {
+				if y.SalaryPersonA.IsZero() && y.SalaryPersonB.IsZero() {
+					firstBoth = idx
+				}
+			}
+		}
+		// Provide sensible defaults if not found
+		if lastBoth == -1 {
+			lastBoth = 0
+		}
+		if firstAny == -1 {
+			firstAny = len(sc.Projection) - 1
+			if firstAny < 0 {
+				firstAny = 0
+			}
+		}
+		if firstBoth == -1 {
+			firstBoth = len(sc.Projection) - 1
+			if firstBoth < 0 {
+				firstBoth = 0
+			}
+		}
+		sc.LastBothEmployedIndex = lastBoth
+		sc.FirstAnyRetiredIndex = firstAny
+		sc.FirstBothRetiredIndex = firstBoth
+
 		ranks = append(ranks, ranked{sc.Name, income})
 	}
 

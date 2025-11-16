@@ -82,6 +82,10 @@ type ScenarioSummary struct {
 	PreRetirementNet2030 decimal.Decimal `json:"pre_retirement_net_2030"` // What current net would be with COLA growth
 	PreRetirementNet2035 decimal.Decimal `json:"pre_retirement_net_2035"`
 	PreRetirementNet2040 decimal.Decimal `json:"pre_retirement_net_2040"`
+	// Reference year indices for comparisons (indices into Projection slice)
+	LastBothEmployedIndex int `json:"last_both_employed_index"`
+	FirstAnyRetiredIndex  int `json:"first_any_retired_index"`
+	FirstBothRetiredIndex int `json:"first_both_retired_index"`
 }
 
 // ScenarioComparison provides a comparison of all scenarios
