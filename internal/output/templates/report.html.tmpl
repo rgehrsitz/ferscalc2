@@ -91,9 +91,9 @@ h1 { margin:0 0 4px 0; font-weight:400; }
   {{range $sIdx, $scenario := .Scenarios}}
   <section style="background:#fcfcfd;">
     <h3 style="margin-top:6px;">{{$scenario.Name}}</h3>
-    {{ $now := index $scenario.Projection $scenario.LastBothEmployedIndex }}
-    {{ $thenAny := index $scenario.Projection $scenario.FirstAnyRetiredIndex }}
-    {{ $thenBoth := index $scenario.Projection $scenario.FirstBothRetiredIndex }}
+    {{ $now := $scenario.LastBothCashFlow }}
+    {{ $thenAny := $scenario.FirstAnyCashFlow }}
+    {{ $thenBoth := $scenario.FirstBothCashFlow }}
       <table class="table">
         <thead><tr><th>Component</th><th>Last Year Both Employed (Year {{$now.Date.Year}})</th><th>First Full Year Any Retired (Year {{$thenAny.Date.Year}})</th><th>First Full Year Both Retired (Year {{$thenBoth.Date.Year}})</th></tr></thead>
         <tbody>

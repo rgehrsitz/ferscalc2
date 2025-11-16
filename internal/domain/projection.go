@@ -50,6 +50,10 @@ type AnnualCashFlow struct {
 	TSPBalanceTraditional decimal.Decimal `json:"tsp_balance_traditional"`
 	TSPBalanceRoth        decimal.Decimal `json:"tsp_balance_roth"`
 
+	// Work fractions: portion of calendar year worked (1 = full year, 0 = fully retired)
+	WorkFractionPersonA decimal.Decimal `json:"work_fraction_person_a"`
+	WorkFractionPersonB decimal.Decimal `json:"work_fraction_person_b"`
+
 	// Additional Information
 	IsRetired          bool            `json:"is_retired"`
 	IsMedicareEligible bool            `json:"is_medicare_eligible"`
@@ -82,10 +86,13 @@ type ScenarioSummary struct {
 	PreRetirementNet2030 decimal.Decimal `json:"pre_retirement_net_2030"` // What current net would be with COLA growth
 	PreRetirementNet2035 decimal.Decimal `json:"pre_retirement_net_2035"`
 	PreRetirementNet2040 decimal.Decimal `json:"pre_retirement_net_2040"`
-	// Reference year indices for comparisons (indices into Projection slice)
-	LastBothEmployedIndex int `json:"last_both_employed_index"`
-	FirstAnyRetiredIndex  int `json:"first_any_retired_index"`
-	FirstBothRetiredIndex int `json:"first_both_retired_index"`
+	// Reference snapshots for comparisons
+	LastBothEmployedIndex int                   `json:"last_both_employed_index"`
+	FirstAnyRetiredIndex  int                   `json:"first_any_retired_index"`
+	FirstBothRetiredIndex int                   `json:"first_both_retired_index"`
+	LastBothCashFlow      AnnualCashFlow        `json:"last_both_cashflow"`
+	FirstAnyCashFlow      AnnualCashFlow        `json:"first_any_cashflow"`
+	FirstBothCashFlow     AnnualCashFlow        `json:"first_both_cashflow"`
 }
 
 // ScenarioComparison provides a comparison of all scenarios
