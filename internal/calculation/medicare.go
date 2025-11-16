@@ -57,6 +57,12 @@ func NewMedicareCalculator() *MedicareCalculator {
 
 // NewMedicareCalculatorWithConfig creates a new Medicare calculator with configurable values
 func NewMedicareCalculatorWithConfig(config domain.MedicareConfig) *MedicareCalculator {
+	// If the provided config is empty (zero values), fall back to sane defaults
+	// so that missing `federal_rules.medicare_config` in user configs does not
+	// result in zero Medicare premiums in reports.
+	if config.BasePremium2025.IsZero() && len(config.IRMAAThresholds) == 0 {
+		return NewMedicareCalculator()
+	}
 	// Convert domain.MedicareIRMAAThreshold to calculation.IRMAAThreshold
 	var thresholds []IRMAAThreshold
 	for _, threshold := range config.IRMAAThresholds {
@@ -173,34 +179,33 @@ func IsMedicareEligible(birthDate, atDate time.Time) bool {
 
 // calculateMedicarePremium calculates Medicare Part B premiums with IRMAA considerations
 // based on current year income (simplified - real IRMAA uses 2-year-old MAGI)
+// calculateMedicarePremium calculates Medicare Part B premiums with IRMAA considerations
+// using an externally provided estimatedMAGI (should be MAGI from two years prior per SSA rules)
+// and returns per-person annual premiums (A, B). projectionDate is used for eligibility and
+// to compute inflation-adjusted premium growth since 2025.
 func (ce *CalculationEngine) calculateMedicarePremium(personA, personB *domain.Employee, projectionDate time.Time,
-	pensionPersonA, pensionPersonB, tspWithdrawalPersonA, tspWithdrawalPersonB, ssPersonA, ssPersonB decimal.Decimal) decimal.Decimal {
-	var totalPremium decimal.Decimal
+	pensionPersonA, pensionPersonB, tspWithdrawalPersonA, tspWithdrawalPersonB, ssPersonA, ssPersonB, estimatedMAGI decimal.Decimal) (decimal.Decimal, decimal.Decimal) {
 
-	// Estimate MAGI for IRMAA calculation (simplified)
-	// In reality, IRMAA uses MAGI from 2 years prior
-	totalPensionIncome := pensionPersonA.Add(pensionPersonB)
-	totalTSPWithdrawals := tspWithdrawalPersonA.Add(tspWithdrawalPersonB)
+	var personAPremium decimal.Decimal
+	var personBPremium decimal.Decimal
 
-	// Calculate taxable portion of Social Security (simplified)
-	totalSSBenefits := ssPersonA.Add(ssPersonB)
-	otherIncome := totalPensionIncome.Add(totalTSPWithdrawals)
-	taxableSSBenefits := ce.TaxCalc.CalculateSocialSecurityTaxation(totalSSBenefits, otherIncome)
+	yearsFrom2025 := projectionDate.Year() - 2025
 
-	// Estimate combined MAGI
-	estimatedMAGI := EstimateMAGI(totalPensionIncome, totalTSPWithdrawals, taxableSSBenefits, decimal.Zero)
+	// Determine filing status for IRMAA calculation: assume married filing jointly for both
+	// when married (simplified); more detailed logic could use cashFlow.FilingStatusSingle.
+	isMarriedFilingJointly := true
 
-	// Check if PersonA is Medicare eligible
+	// Note: estimatedMAGI is expected to already include taxable SS effects. If an external
+	// caller provides only partial MAGI, we could estimate here, but caller will pass full MAGI.
+
+	// Check eligibility and compute per-person premium (with inflation adjustment)
 	if IsMedicareEligible(personA.BirthDate, projectionDate) {
-		personAPremium := ce.MedicareCalc.CalculateAnnualPartBCost(estimatedMAGI, true) // Married filing jointly
-		totalPremium = totalPremium.Add(personAPremium)
+		// Use the inflation-aware calculation
+		personAPremium = ce.MedicareCalc.CalculateMedicarePremiumWithInflation(estimatedMAGI, isMarriedFilingJointly, yearsFrom2025)
 	}
-
-	// Check if PersonB is Medicare eligible
 	if IsMedicareEligible(personB.BirthDate, projectionDate) {
-		personBPremium := ce.MedicareCalc.CalculateAnnualPartBCost(estimatedMAGI, true) // Married filing jointly
-		totalPremium = totalPremium.Add(personBPremium)
+		personBPremium = ce.MedicareCalc.CalculateMedicarePremiumWithInflation(estimatedMAGI, isMarriedFilingJointly, yearsFrom2025)
 	}
 
-	return totalPremium
+	return personAPremium, personBPremium
 }

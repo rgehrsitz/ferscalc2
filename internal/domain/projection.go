@@ -40,6 +40,8 @@ type AnnualCashFlow struct {
 	TSPContributions         decimal.Decimal `json:"tsp_contributions"`
 	FEHBPremium              decimal.Decimal `json:"fehb_premium"`
 	MedicarePremium          decimal.Decimal `json:"medicare_premium"`
+	MedicarePremiumPersonA  decimal.Decimal `json:"medicare_premium_person_a"`
+	MedicarePremiumPersonB  decimal.Decimal `json:"medicare_premium_person_b"`
 	NetIncome                decimal.Decimal `json:"net_income"`
 
 	// TSP Balances (end of year)

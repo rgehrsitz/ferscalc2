@@ -34,6 +34,7 @@ personal_details:
     person_a:
     birth_date: "1963-06-15"
     hire_date: "1985-03-20"
+    employment_type: "federal"
     current_salary: 95000
     high_3_salary: 93000  # Optional, calculated if not provided
     tsp_balance_traditional: 450000
@@ -46,6 +47,7 @@ personal_details:
     person_b:
     birth_date: "1965-08-22"
     hire_date: "1988-07-10"
+    employment_type: "federal"
     current_salary: 87000
     high_3_salary: 85000
     tsp_balance_traditional: 380000
@@ -63,6 +65,13 @@ shared_details:
   fehb_plan: "AETNA High Option"
   fehb_premium_per_pay_period: 875 # This is the per-pay-period amount, which will be annualized by multiplying by 26.
   survivor_benefit_election: 0  # 0% survivor benefits elected
+
+Set `employment_type: "non-federal"` for civilian spouses; the engine will skip FERS/TSP accrual logic but still track wages, Social Security, and taxes. When a non-federal spouse has a constant pension or annuity, add a `fixed_retirement_income` block either under the employee or under an individual scenario to describe the annual amount and optional COLA override:
+
+```yaml
+fixed_retirement_income:
+    annual_amount: 24000
+    cola_rate: 0.02  # Optional; defaults to general COLA when omitted
 ```
 
 ### Scenario Configuration

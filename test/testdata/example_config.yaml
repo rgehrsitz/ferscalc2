@@ -3,6 +3,7 @@ personal_details:
     name: "Person A"
     birth_date: "1963-06-15T00:00:00Z"
     hire_date: "1985-03-20T00:00:00Z"
+    employment_type: "federal"
     current_salary: 95000
     high_3_salary: 93000
     tsp_balance_traditional: 450000
@@ -18,6 +19,7 @@ personal_details:
     name: "Person B"
     birth_date: "1965-08-22T00:00:00Z"
     hire_date: "1988-07-10T00:00:00Z"
+    employment_type: "federal"
     current_salary: 87000
     high_3_salary: 85000
     tsp_balance_traditional: 380000

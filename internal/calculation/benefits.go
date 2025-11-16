@@ -9,6 +9,9 @@ import (
 
 // CalculateFERSSupplementYear calculates the FERS Special Retirement Supplement for a given year offset
 func CalculateFERSSupplementYear(employee *domain.Employee, retirementDate time.Time, yearsSinceRetirement int, inflationRate decimal.Decimal) decimal.Decimal {
+	if employee == nil || employee.EmploymentCategory() != domain.EmploymentTypeFederal {
+		return decimal.Zero
+	}
 	if yearsSinceRetirement < 0 {
 		return decimal.Zero
 	}

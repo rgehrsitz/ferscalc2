@@ -46,6 +46,17 @@ func TestCalculateFERSPension(t *testing.T) {
 	}
 }
 
+func TestCalculateFERSPensionNonFederal(t *testing.T) {
+	employee := &domain.Employee{
+		EmploymentType: domain.EmploymentTypeNonFederal,
+		BirthDate:      time.Date(1965, 1, 1, 0, 0, 0, 0, time.UTC),
+		HireDate:       time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC),
+		High3Salary:    decimal.NewFromInt(100000),
+	}
+	calc := CalculateFERSPension(employee, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	assert.True(t, calc.ReducedPension.IsZero(), "non-federal employees should not generate FERS pensions")
+}
+
 func TestApplyFERSPensionCOLA(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -131,6 +142,17 @@ func TestCalculateFERSSpecialRetirementSupplement(t *testing.T) {
 				"Expected %s, got %s", tt.expectedSRS, result)
 		})
 	}
+}
+
+func TestCalculateFERSSupplementYearNonFederal(t *testing.T) {
+	employee := &domain.Employee{
+		EmploymentType: domain.EmploymentTypeNonFederal,
+		BirthDate:      time.Date(1965, 6, 15, 0, 0, 0, 0, time.UTC),
+		HireDate:       time.Date(1990, 3, 20, 0, 0, 0, 0, time.UTC),
+		SSBenefit62:    decimal.NewFromInt(2000),
+	}
+	amount := CalculateFERSSupplementYear(employee, time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC), 0, decimal.NewFromFloat(0.02))
+	assert.True(t, amount.IsZero(), "non-federal employees should not receive FERS supplement")
 }
 
 func TestValidateFERSEligibility(t *testing.T) {

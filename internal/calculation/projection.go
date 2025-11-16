@@ -16,17 +16,18 @@ const (
 )
 
 type personProjectionState struct {
-	employee       *domain.Employee
-	scenario       *domain.RetirementScenario
-	strategy       TSPWithdrawalStrategy
-	traditional    decimal.Decimal
-	roth           decimal.Decimal
-	retirementYear int
-	deathYearIndex *int
-	mortalitySpec  *domain.MortalitySpec
-	deceased       bool
-	label          string
-	ssProration    ssRetirementProration
+	employee          *domain.Employee
+	scenario          *domain.RetirementScenario
+	strategy          TSPWithdrawalStrategy
+	traditional       decimal.Decimal
+	roth              decimal.Decimal
+	retirementYear    int
+	deathYearIndex    *int
+	mortalitySpec     *domain.MortalitySpec
+	deceased          bool
+	label             string
+	ssProration       ssRetirementProration
+	fixedIncomeConfig *domain.FixedRetirementIncome
 }
 
 type personAnnualResult struct {
@@ -39,6 +40,7 @@ type personAnnualResult struct {
 	survivorPension decimal.Decimal
 	socialSecurity  decimal.Decimal
 	supplement      decimal.Decimal
+	fixedIncome     decimal.Decimal
 	rmd             decimal.Decimal
 	tspWithdrawal   decimal.Decimal
 }
@@ -46,6 +48,9 @@ type personAnnualResult struct {
 // GenerateAnnualProjection generates annual cash flow projections for a scenario
 func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.Employee, scenario *domain.Scenario, assumptions *domain.GlobalAssumptions, federalRules domain.FederalRules) []domain.AnnualCashFlow {
 	projection := make([]domain.AnnualCashFlow, assumptions.ProjectionYears)
+	// Buffer to store estimated MAGI per projection year so we can apply the
+	// SSA 2-year lag for IRMAA determinations (use MAGI from Year-2).
+	magiBuffer := make([]decimal.Decimal, assumptions.ProjectionYears)
 
 	projectionStartYear := ProjectionBaseYear
 
@@ -100,6 +105,10 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 				result.supplement = calculateSupplementForYear(state, year, assumptions.InflationRate, result.workFraction)
 			}
 
+			fixedIncome := calculateFixedRetirementIncome(state, year, assumptions.COLAGeneralRate, result.workFraction)
+			result.fixedIncome = fixedIncome
+			result.pension = result.pension.Add(fixedIncome)
+
 			result.socialSecurity = calculateSocialSecurityForYear(state, year, projectionDate, yearEnd, assumptions.COLAGeneralRate, result)
 			result.rmd = calculateRMDForYear(state, projectionDate, yearEnd, result)
 		}
@@ -124,17 +133,41 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 
 		fehbPremium := CalculateFEHBPremium(personA, year, assumptions.FEHBPremiumInflation, federalRules.FEHBConfig)
 
-		medicarePremium := ce.calculateMedicarePremium(
+		// Estimate MAGI for this projection year and store it in the buffer.
+		totalPension := yearResults[0].pension.Add(yearResults[1].pension)
+		totalTSP := yearResults[0].tspWithdrawal.Add(yearResults[1].tspWithdrawal)
+		totalSS := yearResults[0].socialSecurity.Add(yearResults[1].socialSecurity)
+		otherIncome := totalPension.Add(totalTSP)
+		taxableSS := ce.TaxCalc.CalculateSocialSecurityTaxation(totalSS, otherIncome)
+		estimatedMAGI := EstimateMAGI(totalPension, totalTSP, taxableSS, decimal.Zero)
+		magiBuffer[year] = estimatedMAGI
+
+		// Use MAGI from two years prior for IRMAA determinations per SSA rules.
+		var magiForIRMAA decimal.Decimal
+		if year-2 >= 0 {
+			magiForIRMAA = magiBuffer[year-2]
+		} else {
+			// Fallback: use earliest available MAGI (year 0) for first two years
+			magiForIRMAA = magiBuffer[0]
+		}
+
+		// Use year-end date for Medicare eligibility checks so that
+		// persons who turn 65 during the calendar year are counted
+		// for that year's Medicare premiums (pro-rated handling may
+		// be added later if desired).
+		personAPrem, personBPrem := ce.calculateMedicarePremium(
 			personA,
 			personB,
-			projectionDate,
+			yearEnd,
 			yearResults[0].pension,
 			yearResults[1].pension,
 			yearResults[0].tspWithdrawal,
 			yearResults[1].tspWithdrawal,
 			yearResults[0].socialSecurity,
 			yearResults[1].socialSecurity,
+			magiForIRMAA,
 		)
+		medicarePremium := personAPrem.Add(personBPrem)
 
 		taxInput := TaxCalculationInput{
 			PersonA:          personA,
@@ -191,17 +224,22 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 			TSPContributions:         tspContributions,
 			FEHBPremium:              fehbPremium,
 			MedicarePremium:          medicarePremium,
+			MedicarePremiumPersonA:  personAPrem,
+			MedicarePremiumPersonB:  personBPrem,
 			TSPBalancePersonA:        personStates[0].traditional.Add(personStates[0].roth),
 			TSPBalancePersonB:        personStates[1].traditional.Add(personStates[1].roth),
 			TSPBalanceTraditional:    personStates[0].traditional.Add(personStates[1].traditional),
 			TSPBalanceRoth:           personStates[0].roth.Add(personStates[1].roth),
 			IsRetired:                yearResults[0].isRetired && yearResults[1].isRetired,
-			IsMedicareEligible:       dateutil.IsMedicareEligible(personA.BirthDate, projectionDate) || dateutil.IsMedicareEligible(personB.BirthDate, projectionDate),
-			IsRMDYear:                dateutil.IsRMDYear(personA.BirthDate, projectionDate) || dateutil.IsRMDYear(personB.BirthDate, projectionDate),
-			RMDAmount:                yearResults[0].rmd.Add(yearResults[1].rmd),
-			PersonADeceased:          personStates[0].deceased,
-			PersonBDeceased:          personStates[1].deceased,
-			FilingStatusSingle:       false,
+			// Consider Medicare eligibility based on year-end so that
+			// individuals who turn 65 during the calendar year are
+			// reflected as Medicare-eligible for that year.
+			IsMedicareEligible: dateutil.IsMedicareEligible(personA.BirthDate, yearEnd) || dateutil.IsMedicareEligible(personB.BirthDate, yearEnd),
+			IsRMDYear:          dateutil.IsRMDYear(personA.BirthDate, projectionDate) || dateutil.IsRMDYear(personB.BirthDate, projectionDate),
+			RMDAmount:          yearResults[0].rmd.Add(yearResults[1].rmd),
+			PersonADeceased:    personStates[0].deceased,
+			PersonBDeceased:    personStates[1].deceased,
+			FilingStatusSingle: false,
 		}
 
 		if scenario.Mortality != nil && scenario.Mortality.Assumptions != nil && (personStates[0].deceased != personStates[1].deceased) {
@@ -239,17 +277,25 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 
 func newPersonProjectionState(employee *domain.Employee, scenario *domain.RetirementScenario, strategy TSPWithdrawalStrategy, deathYearIndex *int, mortalitySpec *domain.MortalitySpec, label string, ssMode ssRetirementProration) personProjectionState {
 	return personProjectionState{
-		employee:       employee,
-		scenario:       scenario,
-		strategy:       strategy,
-		traditional:    employee.TSPBalanceTraditional,
-		roth:           employee.TSPBalanceRoth,
-		retirementYear: scenario.RetirementDate.Year() - ProjectionBaseYear,
-		deathYearIndex: deathYearIndex,
-		mortalitySpec:  mortalitySpec,
-		label:          label,
-		ssProration:    ssMode,
+		employee:          employee,
+		scenario:          scenario,
+		strategy:          strategy,
+		traditional:       employee.TSPBalanceTraditional,
+		roth:              employee.TSPBalanceRoth,
+		retirementYear:    scenario.RetirementDate.Year() - ProjectionBaseYear,
+		deathYearIndex:    deathYearIndex,
+		mortalitySpec:     mortalitySpec,
+		label:             label,
+		ssProration:       ssMode,
+		fixedIncomeConfig: resolveFixedRetirementIncome(employee, scenario),
 	}
+}
+
+func resolveFixedRetirementIncome(employee *domain.Employee, scenario *domain.RetirementScenario) *domain.FixedRetirementIncome {
+	if scenario != nil && scenario.FixedRetirementIncome != nil {
+		return scenario.FixedRetirementIncome
+	}
+	return employee.FixedRetirementIncome
 }
 
 func scenarioMortalitySpec(scenario *domain.Scenario, isPersonA bool) *domain.MortalitySpec {
@@ -289,11 +335,58 @@ func calculateWorkFraction(year, retirementYear int, retirementDate, projectionD
 }
 
 func calculatePensionForYear(state *personProjectionState, year int, cola decimal.Decimal, workFraction decimal.Decimal) decimal.Decimal {
+	if state.employee.EmploymentCategory() != domain.EmploymentTypeFederal {
+		return decimal.Zero
+	}
 	pension := CalculatePensionForYear(state.employee, state.scenario.RetirementDate, year-state.retirementYear, cola)
 	if year == state.retirementYear && state.retirementYear >= 0 {
 		pension = pension.Mul(decimal.NewFromInt(1).Sub(workFraction))
 	}
 	return pension
+}
+
+func calculateFixedRetirementIncome(state *personProjectionState, year int, defaultCOLA decimal.Decimal, workFraction decimal.Decimal) decimal.Decimal {
+	cfg := state.fixedIncomeConfig
+	if cfg == nil {
+		return decimal.Zero
+	}
+
+	if year < state.retirementYear {
+		return decimal.Zero
+	}
+
+	yearsSinceRetirement := year - state.retirementYear
+	if yearsSinceRetirement < 0 {
+		yearsSinceRetirement = 0
+	}
+
+	amount := cfg.AnnualAmount
+	colaRate := defaultCOLA
+	if cfg.COLARate != nil {
+		colaRate = *cfg.COLARate
+	}
+
+	if yearsSinceRetirement > 0 {
+		amount = applyRecurringCOLA(amount, colaRate, yearsSinceRetirement)
+	}
+
+	if year == state.retirementYear && state.retirementYear >= 0 {
+		amount = amount.Mul(decimal.NewFromInt(1).Sub(workFraction))
+	}
+
+	return amount
+}
+
+func applyRecurringCOLA(amount decimal.Decimal, rate decimal.Decimal, periods int) decimal.Decimal {
+	if periods <= 0 {
+		return amount
+	}
+	multiplier := decimal.NewFromInt(1).Add(rate)
+	result := amount
+	for i := 0; i < periods; i++ {
+		result = result.Mul(multiplier)
+	}
+	return result
 }
 
 func (ce *CalculationEngine) logPensionDebug(state *personProjectionState, year int, pension decimal.Decimal) {
@@ -313,6 +406,9 @@ func (ce *CalculationEngine) logPensionDebug(state *personProjectionState, year 
 }
 
 func calculateSupplementForYear(state *personProjectionState, year int, inflation decimal.Decimal, workFraction decimal.Decimal) decimal.Decimal {
+	if state.employee.EmploymentCategory() != domain.EmploymentTypeFederal {
+		return decimal.Zero
+	}
 	supplement := CalculateFERSSupplementYear(state.employee, state.scenario.RetirementDate, year-state.retirementYear, inflation)
 	if year == state.retirementYear && state.retirementYear >= 0 {
 		supplement = supplement.Mul(decimal.NewFromInt(1).Sub(workFraction))
@@ -412,6 +508,9 @@ func applySurvivorPensions(year int, assumptions *domain.GlobalAssumptions, stat
 	for idx := range states {
 		decedent := &states[idx]
 		if decedent.deathYearIndex == nil || year < *decedent.deathYearIndex {
+			continue
+		}
+		if decedent.employee.EmploymentCategory() != domain.EmploymentTypeFederal {
 			continue
 		}
 		survivorIdx := 1 - idx

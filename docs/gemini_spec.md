@@ -23,6 +23,7 @@ personal_details:
     person_a:
     birth_date: "1975-03-15"       # YYYY-MM-DD
     hire_date: "2000-07-01"        # YYYY-MM-DD
+    employment_type: "federal"
     current_salary: 120000.00
     high_3_salary: 115000.00       # If not provided, calculate from current_salary/history
     tsp_balance_traditional: 500000.00
@@ -37,6 +38,7 @@ personal_details:
     person_b:
     birth_date: "1978-06-20"
     hire_date: "2003-09-10"
+    employment_type: "federal"
     current_salary: 90000.00
     high_3_salary: 85000.00
     tsp_balance_traditional: 350000.00
@@ -84,6 +86,14 @@ scenarios:
       ss_start_age: 62
       tsp_withdrawal_strategy: "4_percent_rule"
       tsp_withdrawal_target_monthly: null
+```
+
+Set `employment_type: "non-federal"` whenever a spouse is not a FERS participant. Non-federal employees skip pension/TSP accrual logic but remain in tax and cash-flow projections. Provide a `fixed_retirement_income` block on the employee (or on a per-scenario override) to represent constant outside income with an optional COLA override:
+
+```yaml
+fixed_retirement_income:
+    annual_amount: 24000.00
+    cola_rate: 0.02  # Optional; defaults to general COLA when omitted
 ```
 
 ## 3\. Core Calculation Modules

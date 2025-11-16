@@ -10,6 +10,7 @@ A comprehensive retirement planning calculator for Federal Employees Retirement 
 - **Social Security Integration**: Full benefit calculations with 2025 WEP/GPO repeal implementation (2025 wage base: $176,100)
 - **Tax Modeling**: Complete federal, state (Pennsylvania), and local tax calculations
 - **Multiple Scenarios**: Compare multiple retirement scenarios simultaneously
+- **Spousal Flexibility**: Model non-federal spouses via employment types and optional fixed retirement income streams
 - **Long-term Projections**: 25+ year projections with COLA adjustments
 - **Multiple Output Formats**: Console, HTML, JSON, and CSV reports
 - **Monte Carlo Simulations**: Probabilistic analysis using historical market data for portfolio sustainability
@@ -149,6 +150,7 @@ personal_details:
     name: "Person A"
     birth_date: "1963-06-15"
     hire_date: "1985-03-20"
+    employment_type: "federal"  # use "non-federal" for civilian spouses
     current_salary: 95000
     high_3_salary: 93000
     tsp_balance_traditional: 450000
@@ -172,6 +174,7 @@ personal_details:
     name: "Person B"
     birth_date: "1965-08-22"
     hire_date: "1988-07-10"
+    employment_type: "federal"
     current_salary: 87000
     high_3_salary: 85000
     tsp_balance_traditional: 380000
@@ -228,6 +231,26 @@ scenarios:
       retirement_date: "2028-12-31"
       ss_start_age: 62
       tsp_withdrawal_strategy: "4_percent_rule"
+```
+
+### Modeling Non-Federal Spouses & Fixed Income Streams
+
+- Set `employment_type: "non-federal"` for any civilian spouse. Non-federal employees skip FERS pension/TSP accrual logic automatically but still participate in projections and taxes.
+- Provide optional `fixed_retirement_income` blocks on either the employee profile or individual scenarios to model constant pensions, annuities, or other outside income. Scenario-level values override the profile block.
+
+```yaml
+personal_details:
+  person_b:
+    employment_type: "non-federal"
+    fixed_retirement_income:
+      annual_amount: "24000"
+      cola_rate: "0.02"   # Optional; defaults to global COLA when omitted
+
+scenarios:
+  - name: "Spouse Fixed Income"
+    person_b:
+      fixed_retirement_income:
+        annual_amount: "30000"  # override for this scenario only
 ```
 
 ## Calculation Details

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -13,6 +14,7 @@ type Employee struct {
 	Name                           string          `yaml:"name" json:"name"`
 	BirthDate                      time.Time       `yaml:"birth_date" json:"birth_date"`
 	HireDate                       time.Time       `yaml:"hire_date" json:"hire_date"`
+	EmploymentType                 string          `yaml:"employment_type,omitempty" json:"employment_type,omitempty"`
 	CurrentSalary                  decimal.Decimal `yaml:"current_salary" json:"current_salary"`
 	High3Salary                    decimal.Decimal `yaml:"high_3_salary" json:"high_3_salary"`
 	TSPBalanceTraditional          decimal.Decimal `yaml:"tsp_balance_traditional" json:"tsp_balance_traditional"`
@@ -37,16 +39,25 @@ type Employee struct {
 	// Optional fields for additional context (not used in calculations)
 	PayPlanGrade string `yaml:"pay_plan_grade,omitempty" json:"pay_plan_grade,omitempty"`
 	SSNLast4     string `yaml:"ssn_last4,omitempty" json:"ssn_last4,omitempty"`
+
+	// Fixed retirement income for non-federal spouses (or overrides for federal employees)
+	FixedRetirementIncome *FixedRetirementIncome `yaml:"fixed_retirement_income,omitempty" json:"fixed_retirement_income,omitempty"`
 }
+
+const (
+	EmploymentTypeFederal    = "federal"
+	EmploymentTypeNonFederal = "non-federal"
+)
 
 // RetirementScenario represents a specific retirement scenario for an employee
 type RetirementScenario struct {
-	EmployeeName               string           `yaml:"employee_name" json:"employee_name"`
-	RetirementDate             time.Time        `yaml:"retirement_date" json:"retirement_date"`
-	SSStartAge                 int              `yaml:"ss_start_age" json:"ss_start_age"`
-	TSPWithdrawalStrategy      string           `yaml:"tsp_withdrawal_strategy" json:"tsp_withdrawal_strategy"`
-	TSPWithdrawalTargetMonthly *decimal.Decimal `yaml:"tsp_withdrawal_target_monthly,omitempty" json:"tsp_withdrawal_target_monthly,omitempty"`
-	TSPWithdrawalRate          *decimal.Decimal `yaml:"tsp_withdrawal_rate,omitempty" json:"tsp_withdrawal_rate,omitempty"`
+	EmployeeName               string                 `yaml:"employee_name" json:"employee_name"`
+	RetirementDate             time.Time              `yaml:"retirement_date" json:"retirement_date"`
+	SSStartAge                 int                    `yaml:"ss_start_age" json:"ss_start_age"`
+	TSPWithdrawalStrategy      string                 `yaml:"tsp_withdrawal_strategy" json:"tsp_withdrawal_strategy"`
+	TSPWithdrawalTargetMonthly *decimal.Decimal       `yaml:"tsp_withdrawal_target_monthly,omitempty" json:"tsp_withdrawal_target_monthly,omitempty"`
+	TSPWithdrawalRate          *decimal.Decimal       `yaml:"tsp_withdrawal_rate,omitempty" json:"tsp_withdrawal_rate,omitempty"`
+	FixedRetirementIncome      *FixedRetirementIncome `yaml:"fixed_retirement_income,omitempty" json:"fixed_retirement_income,omitempty"`
 
 	// Annuity-specific configuration (used when tsp_withdrawal_strategy is "fixed_annuity")
 	AnnuityPremiumPercent  *decimal.Decimal `yaml:"annuity_premium_percent,omitempty" json:"annuity_premium_percent,omitempty"`   // Percentage of TSP to convert (e.g., 1.0 for 100%, 0.5 for 50%)
@@ -60,17 +71,18 @@ type RetirementScenario struct {
 func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 	// Define a temporary struct with string fields for parsing
 	type Alias struct {
-		EmployeeName               string    `yaml:"employee_name"`
-		RetirementDate             time.Time `yaml:"retirement_date"`
-		SSStartAge                 int       `yaml:"ss_start_age"`
-		TSPWithdrawalStrategy      string    `yaml:"tsp_withdrawal_strategy"`
-		TSPWithdrawalTargetMonthly *string   `yaml:"tsp_withdrawal_target_monthly,omitempty"`
-		TSPWithdrawalRate          *string   `yaml:"tsp_withdrawal_rate,omitempty"`
-		AnnuityPremiumPercent      *string   `yaml:"annuity_premium_percent,omitempty"`
-		AnnuityPayoutRate          *string   `yaml:"annuity_payout_rate,omitempty"`
-		AnnuityCOLARate            *string   `yaml:"annuity_cola_rate,omitempty"`
-		AnnuitySurvivorPercent     *string   `yaml:"annuity_survivor_percent,omitempty"`
-		AnnuityGuaranteedYears     *int      `yaml:"annuity_guaranteed_years,omitempty"`
+		EmployeeName               string                 `yaml:"employee_name"`
+		RetirementDate             time.Time              `yaml:"retirement_date"`
+		SSStartAge                 int                    `yaml:"ss_start_age"`
+		TSPWithdrawalStrategy      string                 `yaml:"tsp_withdrawal_strategy"`
+		TSPWithdrawalTargetMonthly *string                `yaml:"tsp_withdrawal_target_monthly,omitempty"`
+		TSPWithdrawalRate          *string                `yaml:"tsp_withdrawal_rate,omitempty"`
+		FixedRetirementIncome      *FixedRetirementIncome `yaml:"fixed_retirement_income,omitempty"`
+		AnnuityPremiumPercent      *string                `yaml:"annuity_premium_percent,omitempty"`
+		AnnuityPayoutRate          *string                `yaml:"annuity_payout_rate,omitempty"`
+		AnnuityCOLARate            *string                `yaml:"annuity_cola_rate,omitempty"`
+		AnnuitySurvivorPercent     *string                `yaml:"annuity_survivor_percent,omitempty"`
+		AnnuityGuaranteedYears     *int                   `yaml:"annuity_guaranteed_years,omitempty"`
 	}
 
 	var aux Alias
@@ -83,6 +95,7 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 	rs.RetirementDate = aux.RetirementDate
 	rs.SSStartAge = aux.SSStartAge
 	rs.TSPWithdrawalStrategy = aux.TSPWithdrawalStrategy
+	rs.FixedRetirementIncome = aux.FixedRetirementIncome
 	rs.AnnuityGuaranteedYears = aux.AnnuityGuaranteedYears
 
 	// Convert string decimal fields to *decimal.Decimal
@@ -144,6 +157,12 @@ type Scenario struct {
 	PersonA   RetirementScenario `yaml:"person_a" json:"person_a"`
 	PersonB   RetirementScenario `yaml:"person_b" json:"person_b"`
 	Mortality *ScenarioMortality `yaml:"mortality,omitempty" json:"mortality,omitempty"`
+}
+
+// FixedRetirementIncome represents a constant (optionally COLA-adjusted) annual amount
+type FixedRetirementIncome struct {
+	AnnualAmount decimal.Decimal  `yaml:"annual_amount" json:"annual_amount"`
+	COLARate     *decimal.Decimal `yaml:"cola_rate,omitempty" json:"cola_rate,omitempty"`
 }
 
 // ScenarioMortality groups mortality specifications and assumptions for a scenario
@@ -502,13 +521,40 @@ func (e *Employee) TotalTSPBalance() decimal.Decimal {
 	return e.TSPBalanceTraditional.Add(e.TSPBalanceRoth)
 }
 
+// EmploymentCategory returns a normalized employment type string
+func (e *Employee) EmploymentCategory() string {
+	if e == nil {
+		return EmploymentTypeFederal
+	}
+	typeLower := strings.ToLower(strings.TrimSpace(e.EmploymentType))
+	switch typeLower {
+	case "", EmploymentTypeFederal, "fed", "federal employee":
+		return EmploymentTypeFederal
+	case EmploymentTypeNonFederal, "nonfederal", "private", "spouse":
+		return EmploymentTypeNonFederal
+	default:
+		return typeLower
+	}
+}
+
+// HasTSPAccount indicates whether the employee can contribute to the TSP
+func (e *Employee) HasTSPAccount() bool {
+	return e.EmploymentCategory() == EmploymentTypeFederal
+}
+
 // AnnualTSPContribution calculates the annual TSP contribution amount
 func (e *Employee) AnnualTSPContribution() decimal.Decimal {
+	if !e.HasTSPAccount() {
+		return decimal.Zero
+	}
 	return e.CurrentSalary.Mul(e.TSPContributionPercent)
 }
 
 // AgencyMatch calculates the annual agency match (5% of salary if contributing at least 5%)
 func (e *Employee) AgencyMatch() decimal.Decimal {
+	if !e.HasTSPAccount() {
+		return decimal.Zero
+	}
 	if e.TSPContributionPercent.GreaterThanOrEqual(decimal.NewFromFloat(0.05)) {
 		return e.CurrentSalary.Mul(decimal.NewFromFloat(0.05))
 	}

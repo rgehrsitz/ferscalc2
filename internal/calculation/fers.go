@@ -32,6 +32,9 @@ type FERSPensionCalculation struct {
 
 // CalculateFERSPension calculates the annual FERS pension
 func CalculateFERSPension(employee *domain.Employee, retirementDate time.Time) FERSPensionCalculation {
+	if employee == nil || employee.EmploymentCategory() != domain.EmploymentTypeFederal {
+		return FERSPensionCalculation{}
+	}
 	// Calculate years of service
 	serviceYears := employee.YearsOfService(retirementDate)
 	retirementAge := employee.Age(retirementDate)
@@ -161,6 +164,9 @@ func ProjectFERSPension(employee *domain.Employee, retirementDate time.Time, pro
 
 // CalculatePensionForYear calculates the pension amount for a specific year in the projection
 func CalculatePensionForYear(employee *domain.Employee, retirementDate time.Time, year int, inflationRate decimal.Decimal) decimal.Decimal {
+	if employee == nil || employee.EmploymentCategory() != domain.EmploymentTypeFederal {
+		return decimal.Zero
+	}
 	// Calculate initial pension
 	initialCalculation := CalculateFERSPension(employee, retirementDate)
 	initialPension := initialCalculation.ReducedPension
