@@ -69,9 +69,9 @@ personal_details:
     #   # Allocation data is automatically loaded from CSV files in data/tsp-returns/
 
 global_assumptions:
-  inflation_rate: "0.03"
-  fehb_premium_inflation: "0.08"
-  tsp_return_pre_retirement: "0.05"  # Conservative estimate for L 2030 funds
+  inflation_rate: "0.025"
+  fehb_premium_inflation: "0.07"
+  tsp_return_pre_retirement: "0.06"  # Conservative estimate for L 2030 funds
   tsp_return_post_retirement: "0.04"
   cola_general_rate: "0.02"
   projection_years: 30
