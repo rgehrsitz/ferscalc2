@@ -40,8 +40,8 @@ type AnnualCashFlow struct {
 	TSPContributions         decimal.Decimal `json:"tsp_contributions"`
 	FEHBPremium              decimal.Decimal `json:"fehb_premium"`
 	MedicarePremium          decimal.Decimal `json:"medicare_premium"`
-	MedicarePremiumPersonA  decimal.Decimal `json:"medicare_premium_person_a"`
-	MedicarePremiumPersonB  decimal.Decimal `json:"medicare_premium_person_b"`
+	MedicarePremiumPersonA   decimal.Decimal `json:"medicare_premium_person_a"`
+	MedicarePremiumPersonB   decimal.Decimal `json:"medicare_premium_person_b"`
 	NetIncome                decimal.Decimal `json:"net_income"`
 
 	// TSP Balances (end of year)
@@ -182,6 +182,11 @@ func (acf *AnnualCashFlow) CalculateTotalIncome() decimal.Decimal {
 		Add(acf.TSPWithdrawalPersonA).Add(acf.TSPWithdrawalPersonB).
 		Add(acf.SSBenefitPersonA).Add(acf.SSBenefitPersonB).
 		Add(acf.FERSSupplementPersonA).Add(acf.FERSSupplementPersonB)
+}
+
+// FERSSupplementTotal returns the combined FERS supplements for both persons
+func (acf *AnnualCashFlow) FERSSupplementTotal() decimal.Decimal {
+	return acf.FERSSupplementPersonA.Add(acf.FERSSupplementPersonB)
 }
 
 // CalculateTotalDeductions calculates the total deductions for the year
