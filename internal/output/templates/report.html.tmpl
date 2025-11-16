@@ -85,6 +85,83 @@ h1 { margin:0 0 4px 0; font-weight:400; }
 </section>
 
 <section>
+  <h2>Before & After — Now vs Post-Retirement (101)</h2>
+  <p style="font-size:0.95em; color:#333;">This section breaks down what you (and your spouse) currently receive and pay today versus a typical early post-retirement year. It shows income sources, tax and deduction changes, and an explanation of the most common causes for the difference (stopping contributions, FICA, payroll taxes; starting pensions and Social Security; new Medicare premiums; etc.).</p>
+
+  {{range $sIdx, $scenario := .Scenarios}}
+  <section style="background:#fcfcfd;">
+    <h3 style="margin-top:6px;">{{$scenario.Name}}</h3>
+    {{ $now := index $scenario.Projection 0 }}
+    {{ if ge (len $scenario.Projection) 5 }}
+      {{ $then := index $scenario.Projection 4 }}
+      <table class="table">
+        <thead><tr><th>Component</th><th>Now (Year {{$now.Date.Year}})</th><th>Post-Retirement (Year {{$then.Date.Year}})</th></tr></thead>
+        <tbody>
+          <tr><td>Salary — Person A</td><td>{{curr $now.SalaryPersonA}}</td><td>{{curr $then.SalaryPersonA}}</td></tr>
+          <tr><td>Salary — Person B</td><td>{{curr $now.SalaryPersonB}}</td><td>{{curr $then.SalaryPersonB}}</td></tr>
+          <tr><td>Pension — Person A</td><td>{{curr $now.PensionPersonA}}</td><td>{{curr $then.PensionPersonA}}</td></tr>
+          <tr><td>Pension — Person B</td><td>{{curr $now.PensionPersonB}}</td><td>{{curr $then.PensionPersonB}}</td></tr>
+          <tr><td>TSP Withdrawals — Person A</td><td>{{curr $now.TSPWithdrawalPersonA}}</td><td>{{curr $then.TSPWithdrawalPersonA}}</td></tr>
+          <tr><td>TSP Withdrawals — Person B</td><td>{{curr $now.TSPWithdrawalPersonB}}</td><td>{{curr $then.TSPWithdrawalPersonB}}</td></tr>
+          <tr><td>Social Security — Person A</td><td>{{curr $now.SSBenefitPersonA}}</td><td>{{curr $then.SSBenefitPersonA}}</td></tr>
+          <tr><td>Social Security — Person B</td><td>{{curr $now.SSBenefitPersonB}}</td><td>{{curr $then.SSBenefitPersonB}}</td></tr>
+          <tr><td>FERSSupplement — A+B</td><td>{{curr (add $now.FERSSupplementPersonA $now.FERSSupplementPersonB)}}</td><td>{{curr (add $then.FERSSupplementPersonA $then.FERSSupplementPersonB)}}</td></tr>
+          <tr><td><strong>Total Gross Income</strong></td><td><strong>{{curr $now.TotalGrossIncome}}</strong></td><td><strong>{{curr $then.TotalGrossIncome}}</strong></td></tr>
+          <tr><td>Federal Tax (total)</td><td>{{curr $now.FederalTax}}</td><td>{{curr $then.FederalTax}}</td></tr>
+          <tr><td>State Tax (total)</td><td>{{curr $now.StateTax}}</td><td>{{curr $then.StateTax}}</td></tr>
+          <tr><td>FICA</td><td>{{curr $now.FICATax}}</td><td>{{curr $then.FICATax}}</td></tr>
+          <tr><td>TSP Contributions</td><td>{{curr $now.TSPContributions}}</td><td>{{curr $then.TSPContributions}}</td></tr>
+          <tr><td>FEHB Premium</td><td>{{curr $now.FEHBPremium}}</td><td>{{curr $then.FEHBPremium}}</td></tr>
+          <tr><td>Medicare Premium — Person A</td><td>{{curr $now.MedicarePremiumPersonA}}</td><td>{{curr $then.MedicarePremiumPersonA}}</td></tr>
+          <tr><td>Medicare Premium — Person B</td><td>{{curr $now.MedicarePremiumPersonB}}</td><td>{{curr $then.MedicarePremiumPersonB}}</td></tr>
+          <tr><td><strong>Total Deductions</strong></td><td><strong>{{curr $now.CalculateTotalDeductions}}</strong></td><td><strong>{{curr $then.CalculateTotalDeductions}}</strong></td></tr>
+          <tr><td><strong>Net Income</strong></td><td><strong>{{curr $now.NetIncome}}</strong></td><td><strong>{{curr $then.NetIncome}}</strong></td></tr>
+        </tbody>
+      </table>
+    {{ else }}
+      {{ $then := index $scenario.Projection (len $scenario.Projection | minus1) }}
+      <table class="table">
+        <thead><tr><th>Component</th><th>Now (Year {{$now.Date.Year}})</th><th>Post-Retirement (Year {{$then.Date.Year}})</th></tr></thead>
+        <tbody>
+          <tr><td>Salary — Person A</td><td>{{curr $now.SalaryPersonA}}</td><td>{{curr $then.SalaryPersonA}}</td></tr>
+          <tr><td>Salary — Person B</td><td>{{curr $now.SalaryPersonB}}</td><td>{{curr $then.SalaryPersonB}}</td></tr>
+          <tr><td>Pension — Person A</td><td>{{curr $now.PensionPersonA}}</td><td>{{curr $then.PensionPersonA}}</td></tr>
+          <tr><td>Pension — Person B</td><td>{{curr $now.PensionPersonB}}</td><td>{{curr $then.PensionPersonB}}</td></tr>
+          <tr><td>TSP Withdrawals — Person A</td><td>{{curr $now.TSPWithdrawalPersonA}}</td><td>{{curr $then.TSPWithdrawalPersonA}}</td></tr>
+          <tr><td>TSP Withdrawals — Person B</td><td>{{curr $now.TSPWithdrawalPersonB}}</td><td>{{curr $then.TSPWithdrawalPersonB}}</td></tr>
+          <tr><td>Social Security — Person A</td><td>{{curr $now.SSBenefitPersonA}}</td><td>{{curr $then.SSBenefitPersonA}}</td></tr>
+          <tr><td>Social Security — Person B</td><td>{{curr $now.SSBenefitPersonB}}</td><td>{{curr $then.SSBenefitPersonB}}</td></tr>
+          <tr><td>FERSSupplement — A+B</td><td>{{curr (add $now.FERSSupplementPersonA $now.FERSSupplementPersonB)}}</td><td>{{curr (add $then.FERSSupplementPersonA $then.FERSSupplementPersonB)}}</td></tr>
+          <tr><td><strong>Total Gross Income</strong></td><td><strong>{{curr $now.TotalGrossIncome}}</strong></td><td><strong>{{curr $then.TotalGrossIncome}}</strong></td></tr>
+          <tr><td>Federal Tax (total)</td><td>{{curr $now.FederalTax}}</td><td>{{curr $then.FederalTax}}</td></tr>
+          <tr><td>State Tax (total)</td><td>{{curr $now.StateTax}}</td><td>{{curr $then.StateTax}}</td></tr>
+          <tr><td>FICA</td><td>{{curr $now.FICATax}}</td><td>{{curr $then.FICATax}}</td></tr>
+          <tr><td>TSP Contributions</td><td>{{curr $now.TSPContributions}}</td><td>{{curr $then.TSPContributions}}</td></tr>
+          <tr><td>FEHB Premium</td><td>{{curr $now.FEHBPremium}}</td><td>{{curr $then.FEHBPremium}}</td></tr>
+          <tr><td>Medicare Premium — Person A</td><td>{{curr $now.MedicarePremiumPersonA}}</td><td>{{curr $then.MedicarePremiumPersonA}}</td></tr>
+          <tr><td>Medicare Premium — Person B</td><td>{{curr $now.MedicarePremiumPersonB}}</td><td>{{curr $then.MedicarePremiumPersonB}}</td></tr>
+          <tr><td><strong>Total Deductions</strong></td><td><strong>{{curr $now.CalculateTotalDeductions}}</strong></td><td><strong>{{curr $then.CalculateTotalDeductions}}</strong></td></tr>
+          <tr><td><strong>Net Income</strong></td><td><strong>{{curr $now.NetIncome}}</strong></td><td><strong>{{curr $then.NetIncome}}</strong></td></tr>
+        </tbody>
+      </table>
+    {{ end }}
+
+    <div style="font-size:0.9em; color:#444; margin-top:8px;">
+      <strong>Why the difference?</strong>
+      <ul>
+        <li>Payroll deductions (TSP contributions) stop at retirement — this reduces take-home pay but increases long-term savings draw flexibility.</li>
+        <li>FICA (Social Security & Medicare payroll taxes) usually stop once salaries stop — this lowers deductions in retirement.</li>
+        <li>Federal and state taxable income mix changes — pensions and TSP withdrawals can be taxed differently than wages, and Social Security may be partially taxable.</li>
+        <li>FEHB may continue into retirement or be replaced by Medicare — Medicare premiums and IRMAA can increase out-of-pocket healthcare costs.</li>
+        <li>TSP withdrawals and required minimum distributions (RMDs) may increase taxable income later in life.</li>
+      </ul>
+      <p style="color:#555;">Tip: For an apples-to-apples comparison, focus on the <em>Net Income</em> row. If Net Income drops significantly after retirement, look at reduced salary and lost employer contributions first, then examine tax changes and healthcare cost shifts.</p>
+    </div>
+  </section>
+  {{end}}
+</section>
+
+<section>
   <h2>Visual Analysis</h2>
   
   <!-- Combined Total Value chart removed per user request -->
