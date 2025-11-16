@@ -87,12 +87,12 @@ type ScenarioSummary struct {
 	PreRetirementNet2035 decimal.Decimal `json:"pre_retirement_net_2035"`
 	PreRetirementNet2040 decimal.Decimal `json:"pre_retirement_net_2040"`
 	// Reference snapshots for comparisons
-	LastBothEmployedIndex int                   `json:"last_both_employed_index"`
-	FirstAnyRetiredIndex  int                   `json:"first_any_retired_index"`
-	FirstBothRetiredIndex int                   `json:"first_both_retired_index"`
-	LastBothCashFlow      AnnualCashFlow        `json:"last_both_cashflow"`
-	FirstAnyCashFlow      AnnualCashFlow        `json:"first_any_cashflow"`
-	FirstBothCashFlow     AnnualCashFlow        `json:"first_both_cashflow"`
+	LastBothEmployedIndex int            `json:"last_both_employed_index"`
+	FirstAnyRetiredIndex  int            `json:"first_any_retired_index"`
+	FirstBothRetiredIndex int            `json:"first_both_retired_index"`
+	LastBothCashFlow      AnnualCashFlow `json:"last_both_cashflow"`
+	FirstAnyCashFlow      AnnualCashFlow `json:"first_any_cashflow"`
+	FirstBothCashFlow     AnnualCashFlow `json:"first_both_cashflow"`
 }
 
 // ScenarioComparison provides a comparison of all scenarios
