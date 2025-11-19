@@ -63,7 +63,7 @@ type FERSMonteCarloResult struct {
 // FERSMonteCarloSimulation represents a single FERS Monte Carlo simulation
 type FERSMonteCarloSimulation struct {
 	SimulationID     int                       `json:"simulation_id"`
-	MarketConditions MarketCondition           `json:"market_conditions"`
+	MarketConditions MarketConditionSeries     `json:"market_conditions"`
 	ScenarioResults  []*domain.ScenarioSummary `json:"scenario_results"`
 	Success          bool                      `json:"success"`
 	NetIncomeMetrics NetIncomeMetrics          `json:"net_income_metrics"`
@@ -216,14 +216,20 @@ func (fmce *FERSMonteCarloEngine) RunFERSMonteCarlo(config FERSMonteCarloConfig)
 
 // runSingleFERSSimulation runs a single FERS Monte Carlo simulation
 func (fmce *FERSMonteCarloEngine) runSingleFERSSimulation(simIndex int, generator *marketGenerator, metricsCalc *metricsCalculator) (*FERSMonteCarloSimulation, error) {
-	marketConditions := generator.generateMarketConditions()
+	marketConditions := generator.generateMarketConditionSeries(fmce.config.BaseConfig.GlobalAssumptions.ProjectionYears)
 
 	// Create a proper deep copy of the configuration to ensure each simulation is independent
 	modifiedConfig := fmce.deepCopyConfiguration(fmce.config.BaseConfig)
-	modifiedConfig.GlobalAssumptions = fmce.applyMarketConditionsToAssumptions(marketConditions)
+
+	// Apply initial market conditions (Year 0) to assumptions for consistency
+	if len(marketConditions.Years) > 0 {
+		modifiedConfig.GlobalAssumptions = fmce.applyMarketConditionsToAssumptions(marketConditions.Years[0])
+	}
 
 	// Apply TSP market conditions to the configuration
-	fmce.applyMarketConditionsToTSPCalculations(marketConditions, &modifiedConfig)
+	// Note: For path-dependent simulations, we don't apply a single static return here.
+	// Instead, we pass the full series to the engine.
+	// fmce.applyMarketConditionsToTSPCalculations(marketConditions, &modifiedConfig)
 
 	// Create a separate calculation engine instance for this simulation to avoid race conditions
 	// when running parallel simulations with different Monte Carlo fund returns
@@ -233,7 +239,13 @@ func (fmce *FERSMonteCarloEngine) runSingleFERSSimulation(simIndex int, generato
 	simEngine.Debug = fmce.calcEngine.Debug                   // Share debug setting
 
 	// Set Monte Carlo fund returns on this simulation's engine
-	simEngine.MonteCarloFundReturns = marketConditions.TSPReturns
+	// Convert MarketConditionSeries to map[int]map[string]decimal.Decimal
+	simEngine.MonteCarloFundReturns = make(map[int]map[string]decimal.Decimal)
+	for i, condition := range marketConditions.Years {
+		// Map simulation year index (0-based) to calendar year
+		calendarYear := 2025 + i
+		simEngine.MonteCarloFundReturns[calendarYear] = condition.TSPReturns
+	}
 
 	// Run full FERS calculation for each scenario using the simulation-specific engine
 	var scenarioResults []*domain.ScenarioSummary

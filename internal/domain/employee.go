@@ -57,6 +57,8 @@ type RetirementScenario struct {
 	TSPWithdrawalStrategy      string                 `yaml:"tsp_withdrawal_strategy" json:"tsp_withdrawal_strategy"`
 	TSPWithdrawalTargetMonthly *decimal.Decimal       `yaml:"tsp_withdrawal_target_monthly,omitempty" json:"tsp_withdrawal_target_monthly,omitempty"`
 	TSPWithdrawalRate          *decimal.Decimal       `yaml:"tsp_withdrawal_rate,omitempty" json:"tsp_withdrawal_rate,omitempty"`
+	TSPWithdrawalCeiling       *decimal.Decimal       `yaml:"tsp_withdrawal_ceiling,omitempty" json:"tsp_withdrawal_ceiling,omitempty"`
+	TSPWithdrawalFloor         *decimal.Decimal       `yaml:"tsp_withdrawal_floor,omitempty" json:"tsp_withdrawal_floor,omitempty"`
 	FixedRetirementIncome      *FixedRetirementIncome `yaml:"fixed_retirement_income,omitempty" json:"fixed_retirement_income,omitempty"`
 
 	// Annuity-specific configuration (used when tsp_withdrawal_strategy is "fixed_annuity")
@@ -77,6 +79,8 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 		TSPWithdrawalStrategy      string                 `yaml:"tsp_withdrawal_strategy"`
 		TSPWithdrawalTargetMonthly *string                `yaml:"tsp_withdrawal_target_monthly,omitempty"`
 		TSPWithdrawalRate          *string                `yaml:"tsp_withdrawal_rate,omitempty"`
+		TSPWithdrawalCeiling       *string                `yaml:"tsp_withdrawal_ceiling,omitempty"`
+		TSPWithdrawalFloor         *string                `yaml:"tsp_withdrawal_floor,omitempty"`
 		FixedRetirementIncome      *FixedRetirementIncome `yaml:"fixed_retirement_income,omitempty"`
 		AnnuityPremiumPercent      *string                `yaml:"annuity_premium_percent,omitempty"`
 		AnnuityPayoutRate          *string                `yaml:"annuity_payout_rate,omitempty"`
@@ -113,6 +117,22 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 			return err
 		}
 		rs.TSPWithdrawalRate = &val
+	}
+
+	if aux.TSPWithdrawalCeiling != nil {
+		val, err := decimal.NewFromString(*aux.TSPWithdrawalCeiling)
+		if err != nil {
+			return err
+		}
+		rs.TSPWithdrawalCeiling = &val
+	}
+
+	if aux.TSPWithdrawalFloor != nil {
+		val, err := decimal.NewFromString(*aux.TSPWithdrawalFloor)
+		if err != nil {
+			return err
+		}
+		rs.TSPWithdrawalFloor = &val
 	}
 
 	// Convert annuity decimal fields

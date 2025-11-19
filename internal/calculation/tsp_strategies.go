@@ -172,3 +172,72 @@ func (fa *FixedAnnuity) GetMonthlyPayment(year int) decimal.Decimal {
 	annualPayment := fa.CalculateWithdrawal(decimal.Zero, year, decimal.Zero, 0, false, decimal.Zero)
 	return annualPayment.Div(decimal.NewFromInt(12))
 }
+
+// FloorCeilingWithdrawal implements a variable withdrawal with floor and ceiling limits.
+// The withdrawal is based on a percentage of the portfolio, but the dollar amount
+// is constrained to not increase more than the ceiling or decrease more than the floor
+// relative to the previous year's withdrawal (adjusted for inflation).
+type FloorCeilingWithdrawal struct {
+	InitialWithdrawalRate decimal.Decimal
+	CeilingPercentage     decimal.Decimal // Max increase (e.g., 0.20 for 20% higher than inflation-adjusted previous)
+	FloorPercentage       decimal.Decimal // Max decrease (e.g., 0.15 for 15% lower than inflation-adjusted previous)
+	InflationRate         decimal.Decimal
+	LastWithdrawalAmount  decimal.Decimal
+}
+
+func NewFloorCeilingWithdrawal(initialRate, ceiling, floor, inflationRate decimal.Decimal) *FloorCeilingWithdrawal {
+	return &FloorCeilingWithdrawal{
+		InitialWithdrawalRate: initialRate,
+		CeilingPercentage:     ceiling,
+		FloorPercentage:       floor,
+		InflationRate:         inflationRate,
+		LastWithdrawalAmount:  decimal.Zero,
+	}
+}
+
+func (fcw *FloorCeilingWithdrawal) CalculateWithdrawal(currentBalance decimal.Decimal, year int, _ decimal.Decimal, _ int, isRMDYear bool, rmdAmount decimal.Decimal) decimal.Decimal {
+	var withdrawal decimal.Decimal
+
+	if year == 1 {
+		withdrawal = currentBalance.Mul(fcw.InitialWithdrawalRate)
+	} else {
+		// Calculate raw withdrawal based on current balance
+		rawWithdrawal := currentBalance.Mul(fcw.InitialWithdrawalRate)
+
+		// Calculate inflation-adjusted previous withdrawal
+		inflationFactor := decimal.NewFromFloat(1).Add(fcw.InflationRate)
+		prevAdjusted := fcw.LastWithdrawalAmount.Mul(inflationFactor)
+
+		// Calculate ceiling and floor limits
+		ceilingAmount := prevAdjusted.Mul(decimal.NewFromFloat(1).Add(fcw.CeilingPercentage))
+		floorAmount := prevAdjusted.Mul(decimal.NewFromFloat(1).Sub(fcw.FloorPercentage))
+
+		// Apply limits
+		if rawWithdrawal.GreaterThan(ceilingAmount) {
+			withdrawal = ceilingAmount
+		} else if rawWithdrawal.LessThan(floorAmount) {
+			withdrawal = floorAmount
+		} else {
+			withdrawal = rawWithdrawal
+		}
+	}
+
+	// Store for next year
+	fcw.LastWithdrawalAmount = withdrawal
+
+	// Apply RMD and balance checks
+	if isRMDYear && withdrawal.LessThan(rmdAmount) {
+		if rmdAmount.GreaterThan(currentBalance) {
+			return currentBalance
+		}
+		return rmdAmount
+	}
+	if withdrawal.GreaterThan(currentBalance) {
+		return currentBalance
+	}
+	return withdrawal
+}
+
+func (fcw *FloorCeilingWithdrawal) GetStrategyName() string {
+	return "floor_ceiling"
+}

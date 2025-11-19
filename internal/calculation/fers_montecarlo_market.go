@@ -26,6 +26,22 @@ func (g *marketGenerator) generateMarketConditions() MarketCondition {
 	return g.generateStatisticalMarketConditions()
 }
 
+func (g *marketGenerator) generateMarketConditionSeries(years int) MarketConditionSeries {
+	series := MarketConditionSeries{
+		Years: make([]MarketCondition, years),
+	}
+
+	// For now, generate independent random years
+	// Future improvement: Add correlation/momentum logic
+	for i := 0; i < years; i++ {
+		condition := g.generateMarketConditions()
+		condition.Year = 2025 + i // Ensure correct calendar year
+		series.Years[i] = condition
+	}
+
+	return series
+}
+
 func (g *marketGenerator) generateEnhancedHistoricalMarketConditions() MarketCondition {
 	minYear, maxYear, err := g.historicalData.GetAvailableYears()
 	if err != nil {

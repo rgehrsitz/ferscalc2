@@ -28,8 +28,8 @@ type CalculationEngine struct {
 	LifecycleFundLoader   *LifecycleFundLoader
 	NetIncomeCalc         *NetIncomeCalculator
 	HistoricalData        *HistoricalDataManager
-	MonteCarloFundReturns map[string]decimal.Decimal // Monte Carlo generated fund returns for TSP allocation calculations
-	Debug                 bool                       // Enable debug output for detailed calculations
+	MonteCarloFundReturns map[int]map[string]decimal.Decimal // Monte Carlo generated fund returns by year and fund
+	Debug                 bool                               // Enable debug output for detailed calculations
 	Logger                Logger
 }
 

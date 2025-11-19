@@ -24,6 +24,23 @@ func (ce *CalculationEngine) createTSPStrategy(scenario *domain.RetirementScenar
 		}
 		// Fallback to 4% rule if rate not specified
 		return NewFourPercentRule(initialBalance, inflationRate)
+	case "floor_ceiling":
+		rate := decimal.NewFromFloat(0.04) // Default 4% initial
+		if scenario.TSPWithdrawalRate != nil {
+			rate = *scenario.TSPWithdrawalRate
+		}
+
+		ceiling := decimal.NewFromFloat(0.20) // Default 20% ceiling
+		if scenario.TSPWithdrawalCeiling != nil {
+			ceiling = *scenario.TSPWithdrawalCeiling
+		}
+
+		floor := decimal.NewFromFloat(0.15) // Default 15% floor
+		if scenario.TSPWithdrawalFloor != nil {
+			floor = *scenario.TSPWithdrawalFloor
+		}
+
+		return NewFloorCeilingWithdrawal(rate, ceiling, floor, inflationRate)
 	case "fixed_annuity":
 		// Calculate annuity premium (portion of TSP to convert)
 		premiumPercent := decimal.NewFromInt(1) // Default: 100% of TSP
@@ -146,34 +163,47 @@ func (ce *CalculationEngine) calculateTSPReturnWithAllocation(allocation domain.
 	usingMonteCarlo := len(ce.MonteCarloFundReturns) > 0
 
 	if usingMonteCarlo {
-		// Use Monte Carlo generated fund returns, fall back to historical/statistical for missing funds
-		if cReturn, exists := ce.MonteCarloFundReturns["C"]; exists {
-			cFundReturn = cReturn
+		// Get returns for this specific year
+		// Note: Monte Carlo years are mapped to calendar years (e.g., 2025, 2026...)
+		yearReturns, hasYearData := ce.MonteCarloFundReturns[year]
+
+		if hasYearData {
+			// Use Monte Carlo generated fund returns for this year
+			if cReturn, exists := yearReturns["C"]; exists {
+				cFundReturn = cReturn
+			} else {
+				cFundReturn = ce.getFallbackReturn("C", year)
+			}
+
+			if sReturn, exists := yearReturns["S"]; exists {
+				sFundReturn = sReturn
+			} else {
+				sFundReturn = ce.getFallbackReturn("S", year)
+			}
+
+			if iReturn, exists := yearReturns["I"]; exists {
+				iFundReturn = iReturn
+			} else {
+				iFundReturn = ce.getFallbackReturn("I", year)
+			}
+
+			if fReturn, exists := yearReturns["F"]; exists {
+				fFundReturn = fReturn
+			} else {
+				fFundReturn = ce.getFallbackReturn("F", year)
+			}
+
+			if gReturn, exists := yearReturns["G"]; exists {
+				gFundReturn = gReturn
+			} else {
+				gFundReturn = ce.getFallbackReturn("G", year)
+			}
 		} else {
+			// Fallback if year data missing (shouldn't happen in proper simulation)
 			cFundReturn = ce.getFallbackReturn("C", year)
-		}
-
-		if sReturn, exists := ce.MonteCarloFundReturns["S"]; exists {
-			sFundReturn = sReturn
-		} else {
 			sFundReturn = ce.getFallbackReturn("S", year)
-		}
-
-		if iReturn, exists := ce.MonteCarloFundReturns["I"]; exists {
-			iFundReturn = iReturn
-		} else {
 			iFundReturn = ce.getFallbackReturn("I", year)
-		}
-
-		if fReturn, exists := ce.MonteCarloFundReturns["F"]; exists {
-			fFundReturn = fReturn
-		} else {
 			fFundReturn = ce.getFallbackReturn("F", year)
-		}
-
-		if gReturn, exists := ce.MonteCarloFundReturns["G"]; exists {
-			gFundReturn = gReturn
-		} else {
 			gFundReturn = ce.getFallbackReturn("G", year)
 		}
 	} else {

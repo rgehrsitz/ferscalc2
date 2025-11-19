@@ -1,6 +1,8 @@
 package calculation
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rpgo/retirement-calculator/internal/domain"
@@ -11,8 +13,8 @@ func TestFERSMonteCarloEngine(t *testing.T) {
 	// Create test configuration
 	config := createFERSMonteCarloTestConfiguration()
 
-	// Create historical data manager with test data
-	hdm := createTestHistoricalDataManager(t)
+	// Create historical data manager with dummy data
+	hdm := createDummyHistoricalData(t)
 
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
@@ -55,8 +57,8 @@ func TestFERSMonteCarloStatisticalMode(t *testing.T) {
 	// Create test configuration
 	config := createFERSMonteCarloTestConfiguration()
 
-	// Create historical data manager with test data
-	hdm := createTestHistoricalDataManager(t)
+	// Create historical data manager with dummy data
+	hdm := createDummyHistoricalData(t)
 
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
@@ -82,20 +84,27 @@ func TestFERSMonteCarloStatisticalMode(t *testing.T) {
 
 	// Verify that market conditions were generated
 	for i, sim := range result.Simulations {
-		if sim.MarketConditions.Year == 0 {
-			t.Errorf("Simulation %d: Market conditions year should not be 0", i)
+		if len(sim.MarketConditions.Years) == 0 {
+			t.Errorf("Simulation %d: Market conditions series should not be empty", i)
+			continue
 		}
 
-		// Verify TSP returns were generated
-		if len(sim.MarketConditions.TSPReturns) == 0 {
-			t.Errorf("Simulation %d: TSP returns should be generated", i)
-		}
+		for j, condition := range sim.MarketConditions.Years {
+			if condition.Year == 0 {
+				t.Errorf("Simulation %d, Year %d: Market conditions year should not be 0", i, j)
+			}
 
-		// Verify inflation rate is reasonable
-		if sim.MarketConditions.InflationRate.LessThan(decimal.NewFromFloat(-0.1)) ||
-			sim.MarketConditions.InflationRate.GreaterThan(decimal.NewFromFloat(0.2)) {
-			t.Errorf("Simulation %d: Inflation rate should be reasonable, got %s",
-				i, sim.MarketConditions.InflationRate.String())
+			// Verify TSP returns were generated
+			if len(condition.TSPReturns) == 0 {
+				t.Errorf("Simulation %d, Year %d: TSP returns should be generated", i, j)
+			}
+
+			// Verify inflation rate is reasonable
+			if condition.InflationRate.LessThan(decimal.NewFromFloat(-0.1)) ||
+				condition.InflationRate.GreaterThan(decimal.NewFromFloat(0.2)) {
+				t.Errorf("Simulation %d, Year %d: Inflation rate should be reasonable, got %s",
+					i, j, condition.InflationRate.String())
+			}
 		}
 	}
 }
@@ -104,8 +113,8 @@ func TestFERSMonteCarloMarketConditionGeneration(t *testing.T) {
 	// Create test configuration
 	config := createFERSMonteCarloTestConfiguration()
 
-	// Create historical data manager with test data
-	hdm := createTestHistoricalDataManager(t)
+	// Create historical data manager with dummy data
+	hdm := createDummyHistoricalData(t)
 
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
@@ -143,8 +152,8 @@ func TestFERSMonteCarloStatisticalDistributions(t *testing.T) {
 	// Create test configuration
 	config := createFERSMonteCarloTestConfiguration()
 
-	// Create historical data manager with test data
-	hdm := createTestHistoricalDataManager(t)
+	// Create historical data manager with dummy data
+	hdm := createDummyHistoricalData(t)
 
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
@@ -189,8 +198,8 @@ func TestFERSMonteCarloMetricsCalculation(t *testing.T) {
 	// Create test configuration
 	config := createFERSMonteCarloTestConfiguration()
 
-	// Create historical data manager with test data
-	hdm := createTestHistoricalDataManager(t)
+	// Create historical data manager with dummy data
+	hdm := createDummyHistoricalData(t)
 
 	// Create FERS Monte Carlo engine
 	engine := NewFERSMonteCarloEngine(config, hdm)
@@ -341,20 +350,42 @@ func createFERSMonteCarloTestConfiguration() *domain.Configuration {
 	}
 }
 
-func createTestHistoricalDataManager(t *testing.T) *HistoricalDataManager {
-	// Use existing data directory - try multiple paths
-	paths := []string{"./data", "../data", "../../data"}
-	var hdm *HistoricalDataManager
-	var err error
+func createDummyHistoricalData(t *testing.T) *HistoricalDataManager {
+	// Create temporary directory for test data
+	tempDir := t.TempDir()
 
-	for _, path := range paths {
-		hdm = NewHistoricalDataManager(path)
-		err = hdm.LoadAllData()
-		if err == nil {
-			return hdm
-		}
+	// Create subdirectories
+	if err := os.MkdirAll(filepath.Join(tempDir, "tsp-returns"), 0755); err != nil {
+		t.Fatalf("Failed to create tsp-returns directory: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "inflation"), 0755); err != nil {
+		t.Fatalf("Failed to create inflation directory: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "cola"), 0755); err != nil {
+		t.Fatalf("Failed to create cola directory: %v", err)
 	}
 
-	t.Fatalf("Failed to load test historical data from any path: %v", err)
-	return nil
+	// Create dummy CSV files
+	createDummyCSV(t, filepath.Join(tempDir, "tsp-returns", "c-fund-annual.csv"), "2020,0.18\n2021,0.28\n2022,-0.18\n2023,0.26")
+	createDummyCSV(t, filepath.Join(tempDir, "tsp-returns", "s-fund-annual.csv"), "2020,0.32\n2021,0.12\n2022,-0.26\n2023,0.25")
+	createDummyCSV(t, filepath.Join(tempDir, "tsp-returns", "i-fund-annual.csv"), "2020,0.08\n2021,0.11\n2022,-0.14\n2023,0.18")
+	createDummyCSV(t, filepath.Join(tempDir, "tsp-returns", "f-fund-annual.csv"), "2020,0.07\n2021,-0.01\n2022,-0.13\n2023,0.05")
+	createDummyCSV(t, filepath.Join(tempDir, "tsp-returns", "g-fund-annual.csv"), "2020,0.01\n2021,0.015\n2022,0.03\n2023,0.04")
+	createDummyCSV(t, filepath.Join(tempDir, "inflation", "cpi-annual.csv"), "2020,0.012\n2021,0.047\n2022,0.08\n2023,0.034")
+	createDummyCSV(t, filepath.Join(tempDir, "cola", "ss-cola-annual.csv"), "2020,0.016\n2021,0.013\n2022,0.059\n2023,0.087")
+
+	hdm := NewHistoricalDataManager(tempDir)
+	if err := hdm.LoadAllData(); err != nil {
+		t.Fatalf("Failed to load dummy historical data: %v", err)
+	}
+
+	return hdm
+}
+
+func createDummyCSV(t *testing.T, path string, content string) {
+	// Add header
+	fullContent := "year,value\n" + content
+	if err := os.WriteFile(path, []byte(fullContent), 0644); err != nil {
+		t.Fatalf("Failed to write dummy CSV to %s: %v", path, err)
+	}
 }
