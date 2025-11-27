@@ -47,15 +47,7 @@ func NewCalculationEngine() *CalculationEngine {
 
 // NewCalculationEngineWithConfig creates a new calculation engine with configurable tax settings
 func NewCalculationEngineWithConfig(assumptions domain.GlobalAssumptions) *CalculationEngine {
-	taxCalc := NewComprehensiveTaxCalculatorWithConfig(assumptions.FederalRules, assumptions.CurrentLocation.State)
-	return &CalculationEngine{taxCalc: taxCalc}
-}
-
-// NewCalculationEngineWithConfigAndInflation creates a new calculation engine with configurable tax settings and inflation rate
-func NewCalculationEngineWithConfigAndInflation(federalRules domain.FederalRules, inflationRate decimal.Decimal) *CalculationEngine {
-	taxCalc := NewComprehensiveTaxCalculatorWithConfig(federalRules, inflationRate)
-	return &CalculationEngine{taxCalc: taxCalc}
-}
+	taxCalc := NewComprehensiveTaxCalculatorWithConfig(assumptions.FederalRules, assumptions.CurrentLocation.State, assumptions.InflationRate)
 	logger := NopLogger{}
 	engine := &CalculationEngine{
 		TaxCalc:             taxCalc,
@@ -65,9 +57,29 @@ func NewCalculationEngineWithConfigAndInflation(federalRules domain.FederalRules
 		Logger:              logger,
 	}
 
-	// Load lifecycle fund data
+	// Load lifecycle fund data; log but do not fail if data is missing
 	if err := engine.LifecycleFundLoader.LoadAllLifecycleFunds(); err != nil {
-		// Log error but don't fail - fall back to default allocations
+		engine.Logger.Warnf("Failed to load lifecycle fund data: %v", err)
+	}
+
+	return engine
+}
+
+// NewCalculationEngineWithConfigAndInflation creates a new calculation engine with configurable tax settings and an explicit inflation rate.
+// This variant accepts federal rules and an inflation rate. The state will default inside the tax constructor when not provided.
+func NewCalculationEngineWithConfigAndInflation(federalRules domain.FederalRules, inflationRate decimal.Decimal) *CalculationEngine {
+	// Pass an empty state so the tax constructor can pick a sensible default (currently Pennsylvania)
+	taxCalc := NewComprehensiveTaxCalculatorWithConfig(federalRules, "", inflationRate)
+	logger := NopLogger{}
+	engine := &CalculationEngine{
+		TaxCalc:             taxCalc,
+		MedicareCalc:        NewMedicareCalculatorWithConfig(federalRules.MedicareConfig),
+		LifecycleFundLoader: NewLifecycleFundLoader("data"),
+		NetIncomeCalc:       NewNetIncomeCalculator(taxCalc, logger),
+		Logger:              logger,
+	}
+
+	if err := engine.LifecycleFundLoader.LoadAllLifecycleFunds(); err != nil {
 		engine.Logger.Warnf("Failed to load lifecycle fund data: %v", err)
 	}
 
