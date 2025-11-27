@@ -155,18 +155,7 @@ func (ce *CalculationEngine) GenerateAnnualProjection(personA, personB *domain.E
 		// persons who turn 65 during the calendar year are counted
 		// for that year's Medicare premiums (pro-rated handling may
 		// be added later if desired).
-		personAPrem, personBPrem := ce.calculateMedicarePremium(
-			personA,
-			personB,
-			yearEnd,
-			yearResults[0].pension,
-			yearResults[1].pension,
-			yearResults[0].tspWithdrawal,
-			yearResults[1].tspWithdrawal,
-			yearResults[0].socialSecurity,
-			yearResults[1].socialSecurity,
-			magiForIRMAA,
-		)
+		personAPrem, personBPrem := ce.calculateMedicarePremium(personA, personB, yearEnd, magiForIRMAA)
 		medicarePremium := personAPrem.Add(personBPrem)
 
 		taxInput := TaxCalculationInput{
