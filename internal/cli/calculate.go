@@ -57,7 +57,7 @@ Examples:
 		}
 
 		// Create calculation engine
-		engine := calculation.NewCalculationEngineWithConfig(cfg.GlobalAssumptions.FederalRules)
+		engine := calculation.NewCalculationEngineWithConfig(cfg.GlobalAssumptions)
 		if debug {
 			engine.Debug = true
 		}

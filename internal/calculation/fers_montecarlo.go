@@ -130,7 +130,7 @@ func NewFERSMonteCarloEngine(baseConfig *domain.Configuration, historicalData *H
 	}
 
 	return &FERSMonteCarloEngine{
-		calcEngine:     NewCalculationEngineWithConfig(baseConfig.GlobalAssumptions.FederalRules),
+		calcEngine:     NewCalculationEngineWithConfig(baseConfig.GlobalAssumptions),
 		historicalData: historicalData,
 		config: FERSMonteCarloConfig{
 			BaseConfig:           baseConfig,
@@ -233,7 +233,7 @@ func (fmce *FERSMonteCarloEngine) runSingleFERSSimulation(simIndex int, generato
 
 	// Create a separate calculation engine instance for this simulation to avoid race conditions
 	// when running parallel simulations with different Monte Carlo fund returns
-	simEngine := NewCalculationEngineWithConfig(modifiedConfig.GlobalAssumptions.FederalRules)
+	simEngine := NewCalculationEngineWithConfig(modifiedConfig.GlobalAssumptions)
 	simEngine.HistoricalData = fmce.calcEngine.HistoricalData // Share historical data
 	simEngine.Logger = fmce.calcEngine.Logger                 // Share logger
 	simEngine.Debug = fmce.calcEngine.Debug                   // Share debug setting

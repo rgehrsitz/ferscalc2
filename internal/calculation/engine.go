@@ -46,12 +46,12 @@ func NewCalculationEngine() *CalculationEngine {
 }
 
 // NewCalculationEngineWithConfig creates a new calculation engine with configurable tax settings
-func NewCalculationEngineWithConfig(federalRules domain.FederalRules) *CalculationEngine {
-	taxCalc := NewComprehensiveTaxCalculatorWithConfig(federalRules)
+func NewCalculationEngineWithConfig(assumptions domain.GlobalAssumptions) *CalculationEngine {
+	taxCalc := NewComprehensiveTaxCalculatorWithConfig(assumptions.FederalRules, assumptions.CurrentLocation.State)
 	logger := NopLogger{}
 	engine := &CalculationEngine{
 		TaxCalc:             taxCalc,
-		MedicareCalc:        NewMedicareCalculatorWithConfig(federalRules.MedicareConfig),
+		MedicareCalc:        NewMedicareCalculatorWithConfig(assumptions.FederalRules.MedicareConfig),
 		LifecycleFundLoader: NewLifecycleFundLoader("data"),
 		NetIncomeCalc:       NewNetIncomeCalculator(taxCalc, logger),
 		Logger:              logger,

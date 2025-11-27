@@ -231,7 +231,7 @@ func TestShortProjectionGuards(t *testing.T) {
 // TestRealWorldDataValidation tests calculations against real-world expected values
 func TestRealWorldDataValidation(t *testing.T) {
 	config := createTestConfiguration()
-	engine := NewCalculationEngineWithConfig(config.GlobalAssumptions.FederalRules)
+	engine := NewCalculationEngineWithConfig(config.GlobalAssumptions)
 
 	// Test current net income calculation
 	personA := config.PersonalDetails["person_a"]
