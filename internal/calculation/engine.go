@@ -47,7 +47,13 @@ func NewCalculationEngine() *CalculationEngine {
 
 // NewCalculationEngineWithConfig creates a new calculation engine with configurable tax settings
 func NewCalculationEngineWithConfig(federalRules domain.FederalRules) *CalculationEngine {
-	taxCalc := NewComprehensiveTaxCalculatorWithConfig(federalRules)
+	// Default inflation rate for backward compatibility
+	return NewCalculationEngineWithConfigAndInflation(federalRules, decimal.NewFromFloat(DefaultCOLARate))
+}
+
+// NewCalculationEngineWithConfigAndInflation creates a new calculation engine with configurable tax settings and inflation rate
+func NewCalculationEngineWithConfigAndInflation(federalRules domain.FederalRules, inflationRate decimal.Decimal) *CalculationEngine {
+	taxCalc := NewComprehensiveTaxCalculatorWithConfig(federalRules, inflationRate)
 	logger := NopLogger{}
 	engine := &CalculationEngine{
 		TaxCalc:             taxCalc,

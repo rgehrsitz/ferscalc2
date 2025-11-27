@@ -57,7 +57,7 @@ Examples:
 		}
 
 		// Create calculation engine
-		engine := calculation.NewCalculationEngineWithConfig(cfg.GlobalAssumptions.FederalRules)
+		engine := calculation.NewCalculationEngineWithConfigAndInflation(cfg.GlobalAssumptions.FederalRules, cfg.GlobalAssumptions.InflationRate)
 		if debug {
 			engine.Debug = true
 		}

@@ -23,7 +23,8 @@ import (
 //    - Base premium: $185/month per person (2025 estimate)
 //    - IRMAA surcharge: $200/month placeholder (needs AGI-based calculation)
 //
-// TODO: Consider adding inflation indexing for long-term projections
+// Inflation indexing: Tax brackets and standard deductions are adjusted annually based on inflation.
+// This implementation applies cumulative inflation from ProjectionBaseYear (2025) to future years.
 
 // TaxBracket represents a federal tax bracket
 type TaxBracket struct {
@@ -283,6 +284,7 @@ type ComprehensiveTaxCalculator struct {
 	LocalTaxCalc   *UpperMakefieldEITCalculator
 	FICATaxCalc    *FICACalculator
 	SSTaxCalc      *SSTaxCalculator
+	InflationRate  decimal.Decimal // Annual inflation rate for indexing tax brackets
 }
 
 // NewComprehensiveTaxCalculator creates a new comprehensive tax calculator
@@ -293,24 +295,27 @@ func NewComprehensiveTaxCalculator() *ComprehensiveTaxCalculator {
 		LocalTaxCalc:   NewUpperMakefieldEITCalculator(),
 		FICATaxCalc:    NewFICACalculator2025(),
 		SSTaxCalc:      NewSSTaxCalculator(),
+		InflationRate:  decimal.NewFromFloat(DefaultCOLARate), // Default 3% inflation
 	}
 }
 
 // NewComprehensiveTaxCalculatorWithConfig creates a new comprehensive tax calculator with configurable values
-func NewComprehensiveTaxCalculatorWithConfig(federalRules domain.FederalRules) *ComprehensiveTaxCalculator {
+func NewComprehensiveTaxCalculatorWithConfig(federalRules domain.FederalRules, inflationRate decimal.Decimal) *ComprehensiveTaxCalculator {
 	return &ComprehensiveTaxCalculator{
 		FederalTaxCalc: NewFederalTaxCalculator(federalRules.FederalTaxConfig),
 		StateTaxCalc:   NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig),
 		LocalTaxCalc:   NewUpperMakefieldEITCalculatorWithConfig(federalRules.StateLocalTaxConfig),
 		FICATaxCalc:    NewFICACalculator(federalRules.FICATaxConfig),
 		SSTaxCalc:      NewSSTaxCalculator(),
+		InflationRate:  inflationRate,
 	}
 }
 
 // CalculateTotalTaxes calculates all applicable taxes with inflation-adjusted tax brackets
+// This method is for calculating current year (year 0) taxes
 func (ctc *ComprehensiveTaxCalculator) CalculateTotalTaxes(taxableIncome domain.TaxableIncome, isRetired bool, agePersonA, agePersonB int, workingIncome decimal.Decimal) (decimal.Decimal, decimal.Decimal, decimal.Decimal, decimal.Decimal) {
-	// Calculate federal tax with inflation-adjusted brackets
-	federalTax := ctc.calculateFederalTaxWithInflation(taxableIncome, agePersonA, agePersonB)
+	// Calculate federal tax for current year (no inflation adjustment needed for year 0)
+	federalTax := ctc.calculateFederalTaxWithInflation(taxableIncome, agePersonA, agePersonB, 0)
 
 	// Calculate state tax
 	stateTax := ctc.StateTaxCalc.CalculateTax(taxableIncome, isRetired)
@@ -325,7 +330,7 @@ func (ctc *ComprehensiveTaxCalculator) CalculateTotalTaxes(taxableIncome domain.
 }
 
 // calculateFederalTaxWithInflation calculates federal tax with inflation-adjusted brackets
-func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithInflation(taxableIncome domain.TaxableIncome, agePersonA, agePersonB int) decimal.Decimal {
+func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithInflation(taxableIncome domain.TaxableIncome, agePersonA, agePersonB, projectionYear int) decimal.Decimal {
 	// Calculate total taxable income
 	totalIncome := taxableIncome.Salary.Add(taxableIncome.FERSPension).Add(taxableIncome.TSPWithdrawalsTrad).Add(taxableIncome.TaxableSSBenefits).Add(taxableIncome.OtherTaxableIncome)
 
@@ -340,16 +345,25 @@ func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithInflation(taxableI
 		standardDeduction = standardDeduction.Add(ctc.FederalTaxCalc.AdditionalStdDed)
 	}
 
+	// Calculate inflation adjustment factor based on projection year
+	// Tax brackets and standard deductions are indexed to inflation
+	// projectionYear is the offset from ProjectionBaseYear (0 = 2025, 1 = 2026, etc.)
+	var inflationAdjustment decimal.Decimal
+	if projectionYear > 0 && !ctc.InflationRate.IsZero() {
+		// Cumulative inflation: (1 + inflation)^years
+		inflationAdjustment = decimal.NewFromFloat(1.0).Add(ctc.InflationRate).Pow(decimal.NewFromInt(int64(projectionYear)))
+	} else {
+		inflationAdjustment = decimal.NewFromFloat(1.0)
+	}
+
+	// Apply inflation adjustment to standard deduction
+	standardDeduction = standardDeduction.Mul(inflationAdjustment)
+
 	// Calculate adjusted gross income
 	agi := totalIncome.Sub(standardDeduction)
 	if agi.LessThan(decimal.Zero) {
 		agi = decimal.Zero
 	}
-
-	// Apply inflation adjustment to tax brackets
-	// Note: For current tests and 2025 calculations, we do not adjust brackets
-	// Set to 1.0 to keep bracket thresholds unchanged
-	inflationAdjustment := decimal.NewFromFloat(1.0)
 
 	// Calculate tax using inflation-adjusted brackets
 	tax := decimal.Zero
@@ -386,7 +400,7 @@ func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithInflation(taxableI
 }
 
 // calculateFederalTaxWithStatus allows specifying filing status ("mfj" or "single") and number of seniors 65+.
-func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithStatus(agiComponents domain.TaxableIncome, filingStatus string, seniors int) decimal.Decimal {
+func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithStatus(agiComponents domain.TaxableIncome, filingStatus string, seniors, projectionYear int) decimal.Decimal {
 	totalIncome := agiComponents.Salary.Add(agiComponents.FERSPension).Add(agiComponents.TSPWithdrawalsTrad).Add(agiComponents.TaxableSSBenefits).Add(agiComponents.OtherTaxableIncome)
 
 	// Standard deduction based on filing status
@@ -402,12 +416,21 @@ func (ctc *ComprehensiveTaxCalculator) calculateFederalTaxWithStatus(agiComponen
 		standardDed = standardDed.Add(ctc.FederalTaxCalc.AdditionalStdDed)
 	}
 
+	// Calculate inflation adjustment factor
+	var inflationAdjustment decimal.Decimal
+	if projectionYear > 0 && !ctc.InflationRate.IsZero() {
+		inflationAdjustment = decimal.NewFromFloat(1.0).Add(ctc.InflationRate).Pow(decimal.NewFromInt(int64(projectionYear)))
+	} else {
+		inflationAdjustment = decimal.NewFromFloat(1.0)
+	}
+
+	// Apply inflation adjustment to standard deduction
+	standardDed = standardDed.Mul(inflationAdjustment)
+
 	agi := totalIncome.Sub(standardDed)
 	if agi.LessThan(decimal.Zero) {
 		agi = decimal.Zero
 	}
-
-	inflationAdjustment := decimal.NewFromFloat(1.0)
 	remaining := agi
 	tax := decimal.Zero
 	for _, b := range brackets {
@@ -731,13 +754,13 @@ func (ce *CalculationEngine) calculateTransitionYearTaxes(ctx taxComputationCont
 		InterestIncome:     decimal.Zero,
 	}
 
-	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors)
+	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors, ctx.year)
 	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, false)
 	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(totalWorkingIncome, false)
 	personAFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.workingIncomeA, totalWorkingIncome)
 	personBFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.workingIncomeB, totalWorkingIncome)
 	ficaTax := personAFICA.Add(personBFICA)
-	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
+	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors, ctx.year)
 
 	taxableTotal := taxableIncome.Salary.
 		Add(taxableIncome.FERSPension).
@@ -779,10 +802,10 @@ func (ce *CalculationEngine) calculateRetirementYearTaxes(ctx taxComputationCont
 		InterestIncome:     decimal.Zero,
 	}
 
-	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors)
+	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(taxableIncome, ctx.filingStatus, ctx.seniors, ctx.year)
 	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(taxableIncome, true)
 	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(decimal.Zero, true)
-	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
+	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors, ctx.year)
 
 	taxableTotal := taxableIncome.Salary.
 		Add(taxableIncome.FERSPension).
@@ -804,7 +827,7 @@ func (ce *CalculationEngine) calculateRetirementYearTaxes(ctx taxComputationCont
 func (ce *CalculationEngine) calculateWorkingYearTaxes(ctx taxComputationContext) taxResult {
 	currentTaxableIncome := CalculateCurrentTaxableIncome(ctx.currentSalaryA, ctx.currentSalaryB)
 
-	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(currentTaxableIncome, ctx.filingStatus, ctx.seniors)
+	federalTax := ce.TaxCalc.calculateFederalTaxWithStatus(currentTaxableIncome, ctx.filingStatus, ctx.seniors, ctx.year)
 	stateTax := ce.TaxCalc.StateTaxCalc.CalculateTax(currentTaxableIncome, false)
 	localTax := ce.TaxCalc.LocalTaxCalc.CalculateEIT(ctx.combinedCurrentSalary(), false)
 
@@ -813,7 +836,7 @@ func (ce *CalculationEngine) calculateWorkingYearTaxes(ctx taxComputationContext
 	personBFICA := ce.TaxCalc.FICATaxCalc.CalculateFICA(ctx.currentSalaryB, totalCurrentSalary)
 	ficaTax := personAFICA.Add(personBFICA)
 
-	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors)
+	standardDeduction := ce.standardDeductionFor(ctx.filingStatus, ctx.seniors, ctx.year)
 
 	return taxResult{
 		federal:           federalTax,
@@ -827,7 +850,7 @@ func (ce *CalculationEngine) calculateWorkingYearTaxes(ctx taxComputationContext
 	}
 }
 
-func (ce *CalculationEngine) standardDeductionFor(filingStatus string, seniors int) decimal.Decimal {
+func (ce *CalculationEngine) standardDeductionFor(filingStatus string, seniors, projectionYear int) decimal.Decimal {
 	standardDeduction := ce.TaxCalc.FederalTaxCalc.StandardDeduction
 	if filingStatus == "single" {
 		standardDeduction = ce.TaxCalc.FederalTaxCalc.StandardDeductionSingle
@@ -835,5 +858,12 @@ func (ce *CalculationEngine) standardDeductionFor(filingStatus string, seniors i
 	for i := 0; i < seniors; i++ {
 		standardDeduction = standardDeduction.Add(ce.TaxCalc.FederalTaxCalc.AdditionalStdDed)
 	}
+
+	// Apply inflation adjustment
+	if projectionYear > 0 && !ce.TaxCalc.InflationRate.IsZero() {
+		inflationAdjustment := decimal.NewFromFloat(1.0).Add(ce.TaxCalc.InflationRate).Pow(decimal.NewFromInt(int64(projectionYear)))
+		standardDeduction = standardDeduction.Mul(inflationAdjustment)
+	}
+
 	return standardDeduction
 }

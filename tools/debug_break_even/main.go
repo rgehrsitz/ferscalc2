@@ -20,7 +20,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	engine := calc.NewCalculationEngineWithConfig(cfg.GlobalAssumptions.FederalRules)
+	engine := calc.NewCalculationEngineWithConfigAndInflation(cfg.GlobalAssumptions.FederalRules, cfg.GlobalAssumptions.InflationRate)
 	res, err := engine.RunScenarios(cfg)
 	if err != nil {
 		panic(err)
