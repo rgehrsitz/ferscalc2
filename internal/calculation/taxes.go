@@ -125,6 +125,11 @@ func (ftc *FederalTaxCalculator) CalculateFederalTax(grossIncome decimal.Decimal
 	return totalTax
 }
 
+// StateTaxCalculator defines the interface for state tax calculations
+type StateTaxCalculator interface {
+	CalculateTax(income domain.TaxableIncome, isRetired bool) decimal.Decimal
+}
+
 // PennsylvaniaTaxCalculator handles Pennsylvania state tax calculations
 type PennsylvaniaTaxCalculator struct {
 	Rate decimal.Decimal
@@ -144,7 +149,7 @@ func NewPennsylvaniaTaxCalculatorWithConfig(config domain.StateLocalTaxConfig) *
 	}
 }
 
-// CalculatePennsylvaniaStateIncomeTax calculates Pennsylvania state income tax
+// CalculateTax calculates Pennsylvania state income tax
 // PA has a flat tax rate (currently 3.07%)
 // Key Exclusions: PA does NOT tax FERS pensions, TSP withdrawals, or Social Security benefits
 // Only earned income (salary) is typically taxed
@@ -158,6 +163,74 @@ func (ptc *PennsylvaniaTaxCalculator) CalculateTax(income domain.TaxableIncome, 
 
 	// While working: tax wages at configured rate
 	return income.WageIncome.Mul(ptc.Rate)
+}
+
+// NewJerseyTaxCalculator handles New Jersey state tax calculations
+type NewJerseyTaxCalculator struct {
+	// For simplicity in this phase, we might use a single effective rate or a simplified bracket set
+	// NJ has progressive rates from 1.4% to 10.75%
+	// NJ excludes SS.
+	// NJ has a pension exclusion for those 62+ with income <= $150k (phased out)
+}
+
+// NewNewJerseyTaxCalculator creates a new NJ tax calculator
+func NewNewJerseyTaxCalculator() *NewJerseyTaxCalculator {
+	return &NewJerseyTaxCalculator{}
+}
+
+// CalculateTax calculates New Jersey state income tax
+func (njtc *NewJerseyTaxCalculator) CalculateTax(income domain.TaxableIncome, isRetired bool) decimal.Decimal {
+	// Simplified NJ Tax Logic for Phase 1
+	// 1. Social Security is exempt.
+	// 2. Pension/Retirement income exclusion (simplified):
+	//    If total income is reasonable, we assume some exclusion.
+	//    For now, let's apply a simplified progressive rate on taxable income.
+
+	// Taxable base: Salary + Pension + TSP + Other (SS is exempt)
+	taxableIncome := income.Salary.Add(income.FERSPension).Add(income.TSPWithdrawalsTrad).Add(income.OtherTaxableIncome)
+
+	// Simple progressive brackets (approximate for 2024/2025)
+	// 0 - 20k: 1.4%
+	// 20k - 35k: 1.75%
+	// 35k - 40k: 3.5%
+	// 40k - 75k: 5.525%
+	// 75k - 500k: 6.37%
+	// 500k+: 8.97% (ignoring top bracket for now)
+
+	// We'll implement a simple bracket calculation here
+	// Note: This is a simplification. Real NJ tax has filing status differences.
+
+	var tax decimal.Decimal
+	remaining := taxableIncome
+
+	brackets := []struct {
+		limit decimal.Decimal
+		rate  decimal.Decimal
+	}{
+		{decimal.NewFromInt(20000), decimal.NewFromFloat(0.014)},
+		{decimal.NewFromInt(35000), decimal.NewFromFloat(0.0175)},
+		{decimal.NewFromInt(40000), decimal.NewFromFloat(0.035)},
+		{decimal.NewFromInt(75000), decimal.NewFromFloat(0.05525)},
+		{decimal.NewFromInt(500000), decimal.NewFromFloat(0.0637)},
+		{decimal.NewFromInt(999999999), decimal.NewFromFloat(0.0897)},
+	}
+
+	prevLimit := decimal.Zero
+	for _, b := range brackets {
+		if remaining.LessThanOrEqual(decimal.Zero) {
+			break
+		}
+
+		width := b.limit.Sub(prevLimit)
+		taxableInBracket := decimal.Min(remaining, width)
+
+		tax = tax.Add(taxableInBracket.Mul(b.rate))
+
+		remaining = remaining.Sub(taxableInBracket)
+		prevLimit = b.limit
+	}
+
+	return tax
 }
 
 // UpperMakefieldEITCalculator handles Upper Makefield Township local tax calculations
@@ -279,7 +352,7 @@ func (fc *FICACalculator) CalculateFICAWithProration(wages decimal.Decimal, tota
 // ComprehensiveTaxCalculator handles all tax calculations
 type ComprehensiveTaxCalculator struct {
 	FederalTaxCalc *FederalTaxCalculator
-	StateTaxCalc   *PennsylvaniaTaxCalculator
+	StateTaxCalc   StateTaxCalculator
 	LocalTaxCalc   *UpperMakefieldEITCalculator
 	FICATaxCalc    *FICACalculator
 	SSTaxCalc      *SSTaxCalculator
@@ -297,10 +370,22 @@ func NewComprehensiveTaxCalculator() *ComprehensiveTaxCalculator {
 }
 
 // NewComprehensiveTaxCalculatorWithConfig creates a new comprehensive tax calculator with configurable values
-func NewComprehensiveTaxCalculatorWithConfig(federalRules domain.FederalRules) *ComprehensiveTaxCalculator {
+func NewComprehensiveTaxCalculatorWithConfig(federalRules domain.FederalRules, state string) *ComprehensiveTaxCalculator {
+	var stateCalc StateTaxCalculator
+	switch state {
+	case "New Jersey":
+		stateCalc = NewNewJerseyTaxCalculator()
+	case "Pennsylvania":
+		stateCalc = NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig)
+	default:
+		// Default to PA if unknown, or maybe a generic zero tax calculator?
+		// For now, default to PA as it was the previous behavior
+		stateCalc = NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig)
+	}
+
 	return &ComprehensiveTaxCalculator{
 		FederalTaxCalc: NewFederalTaxCalculator(federalRules.FederalTaxConfig),
-		StateTaxCalc:   NewPennsylvaniaTaxCalculatorWithConfig(federalRules.StateLocalTaxConfig),
+		StateTaxCalc:   stateCalc,
 		LocalTaxCalc:   NewUpperMakefieldEITCalculatorWithConfig(federalRules.StateLocalTaxConfig),
 		FICATaxCalc:    NewFICACalculator(federalRules.FICATaxConfig),
 		SSTaxCalc:      NewSSTaxCalculator(),

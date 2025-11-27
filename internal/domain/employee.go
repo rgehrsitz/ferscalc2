@@ -366,6 +366,11 @@ type StateLocalTaxConfig struct {
 
 	// Upper Makefield Township EIT (local tax)
 	UpperMakefieldEITRate decimal.Decimal `yaml:"upper_makefield_eit_rate" json:"upper_makefield_eit_rate"` // Default: 0.01 (1% on earned income)
+
+	// New Jersey state tax (simplified rate for now, or use brackets if implementing full logic)
+	// NJ has progressive brackets, but we can allow a configurable effective rate or top rate here.
+	// For now, let's just add the field.
+	NewJerseyRate decimal.Decimal `yaml:"new_jersey_rate,omitempty" json:"new_jersey_rate,omitempty"`
 }
 
 // FICATaxConfig contains FICA tax configuration (updated annually)
