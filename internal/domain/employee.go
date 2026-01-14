@@ -255,7 +255,7 @@ func (ga *GlobalAssumptions) GenerateAssumptions() []string {
 		fmt.Sprintf("TSP growth pre-retirement: %.1f%% annually", ga.TSPReturnPreRetirement.Mul(decimal.NewFromInt(100)).InexactFloat64()),
 		fmt.Sprintf("TSP growth post-retirement: %.1f%% annually", ga.TSPReturnPostRetirement.Mul(decimal.NewFromInt(100)).InexactFloat64()),
 		"Social Security wage base indexing: ~5% annually (2025 est: $168,600)",
-		"Tax brackets: 2025 levels held constant (no inflation indexing)",
+		fmt.Sprintf("Tax brackets & deductions: indexed to inflation (%.1f%% annually from 2025 baseline)", ga.InflationRate.Mul(decimal.NewFromInt(100)).InexactFloat64()),
 	}
 }
 
@@ -388,6 +388,11 @@ type StateLocalTaxConfig struct {
 
 	// Upper Makefield Township EIT (local tax)
 	UpperMakefieldEITRate decimal.Decimal `yaml:"upper_makefield_eit_rate" json:"upper_makefield_eit_rate"` // Default: 0.01 (1% on earned income)
+
+	// New Jersey state tax (simplified rate for now, or use brackets if implementing full logic)
+	// NJ has progressive brackets, but we can allow a configurable effective rate or top rate here.
+	// For now, let's just add the field.
+	NewJerseyRate decimal.Decimal `yaml:"new_jersey_rate,omitempty" json:"new_jersey_rate,omitempty"`
 }
 
 // FICATaxConfig contains FICA tax configuration (updated annually)

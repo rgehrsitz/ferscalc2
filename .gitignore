@@ -91,3 +91,5 @@ example_config_comprehensive.yaml
 .crush/
 
 *.console
+
+!internal/web/static/**

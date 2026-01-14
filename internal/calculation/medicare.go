@@ -183,8 +183,7 @@ func IsMedicareEligible(birthDate, atDate time.Time) bool {
 // using an externally provided estimatedMAGI (should be MAGI from two years prior per SSA rules)
 // and returns per-person annual premiums (A, B). projectionDate is used for eligibility and
 // to compute inflation-adjusted premium growth since 2025.
-func (ce *CalculationEngine) calculateMedicarePremium(personA, personB *domain.Employee, projectionDate time.Time,
-	pensionPersonA, pensionPersonB, tspWithdrawalPersonA, tspWithdrawalPersonB, ssPersonA, ssPersonB, estimatedMAGI decimal.Decimal) (decimal.Decimal, decimal.Decimal) {
+func (ce *CalculationEngine) calculateMedicarePremium(personA, personB *domain.Employee, projectionDate time.Time, estimatedMAGI decimal.Decimal) (decimal.Decimal, decimal.Decimal) {
 
 	var personAPremium decimal.Decimal
 	var personBPremium decimal.Decimal

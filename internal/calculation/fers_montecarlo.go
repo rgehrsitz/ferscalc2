@@ -130,7 +130,7 @@ func NewFERSMonteCarloEngine(baseConfig *domain.Configuration, historicalData *H
 	}
 
 	return &FERSMonteCarloEngine{
-		calcEngine:     NewCalculationEngineWithConfig(baseConfig.GlobalAssumptions.FederalRules),
+		calcEngine:     NewCalculationEngineWithConfigAndInflation(baseConfig.GlobalAssumptions.FederalRules, baseConfig.GlobalAssumptions.InflationRate),
 		historicalData: historicalData,
 		config: FERSMonteCarloConfig{
 			BaseConfig:           baseConfig,
@@ -233,7 +233,7 @@ func (fmce *FERSMonteCarloEngine) runSingleFERSSimulation(simIndex int, generato
 
 	// Create a separate calculation engine instance for this simulation to avoid race conditions
 	// when running parallel simulations with different Monte Carlo fund returns
-	simEngine := NewCalculationEngineWithConfig(modifiedConfig.GlobalAssumptions.FederalRules)
+	simEngine := NewCalculationEngineWithConfigAndInflation(modifiedConfig.GlobalAssumptions.FederalRules, modifiedConfig.GlobalAssumptions.InflationRate)
 	simEngine.HistoricalData = fmce.calcEngine.HistoricalData // Share historical data
 	simEngine.Logger = fmce.calcEngine.Logger                 // Share logger
 	simEngine.Debug = fmce.calcEngine.Debug                   // Share debug setting
@@ -288,45 +288,7 @@ func (fmce *FERSMonteCarloEngine) applyMarketConditionsToAssumptions(market Mark
 	return assumptions
 }
 
-// applyMarketConditionsToTSPCalculations applies market conditions to TSP calculations
-func (fmce *FERSMonteCarloEngine) applyMarketConditionsToTSPCalculations(market MarketCondition, config *domain.Configuration) {
-	// Get default TSP allocation from configuration
-	defaultAllocation := config.GlobalAssumptions.MonteCarloSettings.DefaultTSPAllocation
 
-	// Create asset allocation map from configuration (with fallback defaults)
-	assetAllocation := map[string]decimal.Decimal{
-		"C": defaultAllocation.CFund,
-		"S": defaultAllocation.SFund,
-		"I": defaultAllocation.IFund,
-		"F": defaultAllocation.FFund,
-		"G": defaultAllocation.GFund,
-	}
-
-	// Apply fallback defaults if allocation is zero or not configured
-	if defaultAllocation.CFund.IsZero() && defaultAllocation.SFund.IsZero() &&
-		defaultAllocation.IFund.IsZero() && defaultAllocation.FFund.IsZero() &&
-		defaultAllocation.GFund.IsZero() {
-		// Use conservative balanced allocation as ultimate fallback
-		assetAllocation = map[string]decimal.Decimal{
-			"C": decimal.NewFromFloat(0.60), // 60% Large Cap Stock Index
-			"S": decimal.NewFromFloat(0.20), // 20% Small Cap Stock Index
-			"I": decimal.NewFromFloat(0.10), // 10% International Stock Index
-			"F": decimal.NewFromFloat(0.10), // 10% Fixed Income Index
-			"G": decimal.NewFromFloat(0.00), // 0% Government Securities
-		}
-	}
-
-	var weightedReturn decimal.Decimal
-	for fund, allocation := range assetAllocation {
-		if returnRate, exists := market.TSPReturns[fund]; exists {
-			weightedReturn = weightedReturn.Add(returnRate.Mul(allocation))
-		}
-	}
-
-	// Apply the weighted return to both pre and post retirement TSP return rates
-	config.GlobalAssumptions.TSPReturnPreRetirement = weightedReturn
-	config.GlobalAssumptions.TSPReturnPostRetirement = weightedReturn
-}
 
 // deepCopyConfiguration creates a deep copy of the configuration to ensure each simulation is independent
 func (fmce *FERSMonteCarloEngine) deepCopyConfiguration(config *domain.Configuration) domain.Configuration {
