@@ -27,17 +27,43 @@ A comprehensive retirement planning calculator for Federal Employees Retirement 
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.24 or later (matches `go.mod`)
 - Git
+- Make (optional, for the convenience targets)
 
 ### Build from Source
 
+#### 1. Clone and install dependencies
+
 ```bash
-git clone https://github.com/example/rpgo.git
-cd rpgo
-go mod tidy
-go build -o fers-calc cmd/cli/main.go
+git clone https://github.com/rgehrsitz/ferscalc2.git
+cd ferscalc2
+go mod download
 ```
+
+#### 2. Build the CLI
+
+```bash
+# Recommended: uses Makefile to embed version/build metadata
+make build
+
+# Or build directly with Go
+go build -o fers-calc ./cmd/fers-calc
+```
+
+> **Tip:** `go run ./cmd/fers-calc --help` lets you try the CLI without producing a binary.
+
+#### 3. (Optional) Install globally
+
+```bash
+# Make target wraps go install with metadata
+make install
+
+# Or run go install directly
+go install ./cmd/fers-calc
+```
+
+The binary will be placed in `$(go env GOPATH)/bin`. Add that directory to your `PATH` (or copy the binary somewhere on `PATH`) to call `fers-calc` from anywhere.
 
 ## Usage
 
@@ -401,8 +427,8 @@ Result: 84% success rate, moderate risk assessment
 ## Project Structure
 
 ```text
-rpgo/
-├── cmd/cli/                 # Command line interface
+ferscalc2/
+├── cmd/fers-calc/           # Command line interface entry point
 ├── data/                   # Historical financial data
 │   ├── tsp-returns/        # TSP fund historical returns
 │   ├── inflation/          # CPI-U inflation rates

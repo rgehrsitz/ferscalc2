@@ -270,6 +270,29 @@ func TestRetirementScenario_UnmarshalYAML_InvalidDecimal(t *testing.T) {
 	assert.Contains(t, err.Error(), "can't convert")
 }
 
+func TestParseFlexibleDate(t *testing.T) {
+	t.Run("accepts RFC3339", func(t *testing.T) {
+		date, err := parseFlexibleDate("2037-03-15T00:00:00Z")
+		assert.NoError(t, err)
+		assert.Equal(t, 2037, date.Year())
+		assert.Equal(t, time.March, date.Month())
+		assert.Equal(t, 15, date.Day())
+	})
+
+	t.Run("accepts simple date", func(t *testing.T) {
+		date, err := parseFlexibleDate("2037-03-15")
+		assert.NoError(t, err)
+		assert.Equal(t, 2037, date.Year())
+		assert.Equal(t, time.March, date.Month())
+		assert.Equal(t, 15, date.Day())
+	})
+
+	t.Run("rejects empty", func(t *testing.T) {
+		_, err := parseFlexibleDate(" ")
+		assert.Error(t, err)
+	})
+}
+
 func TestTSPAllocation_Validation(t *testing.T) {
 	// Test valid allocation
 	allocation := TSPAllocation{

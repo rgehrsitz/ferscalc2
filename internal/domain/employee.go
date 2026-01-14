@@ -74,7 +74,7 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 	// Define a temporary struct with string fields for parsing
 	type Alias struct {
 		EmployeeName               string                 `yaml:"employee_name"`
-		RetirementDate             time.Time              `yaml:"retirement_date"`
+		RetirementDate             string                 `yaml:"retirement_date"`
 		SSStartAge                 int                    `yaml:"ss_start_age"`
 		TSPWithdrawalStrategy      string                 `yaml:"tsp_withdrawal_strategy"`
 		TSPWithdrawalTargetMonthly *string                `yaml:"tsp_withdrawal_target_monthly,omitempty"`
@@ -96,7 +96,11 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 
 	// Copy non-decimal fields
 	rs.EmployeeName = aux.EmployeeName
-	rs.RetirementDate = aux.RetirementDate
+	parsedRetirementDate, err := parseFlexibleDate(aux.RetirementDate)
+	if err != nil {
+		return fmt.Errorf("invalid retirement_date for %s: %w", aux.EmployeeName, err)
+	}
+	rs.RetirementDate = parsedRetirementDate
 	rs.SSStartAge = aux.SSStartAge
 	rs.TSPWithdrawalStrategy = aux.TSPWithdrawalStrategy
 	rs.FixedRetirementIncome = aux.FixedRetirementIncome
@@ -169,6 +173,24 @@ func (rs *RetirementScenario) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	return nil
+}
+
+// parseFlexibleDate accepts RFC3339 timestamps or simple YYYY-MM-DD dates.
+func parseFlexibleDate(v string) (time.Time, error) {
+	if strings.TrimSpace(v) == "" {
+		return time.Time{}, fmt.Errorf("date value is empty")
+	}
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02",
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse date %q; expected RFC3339 or YYYY-MM-DD", v)
 }
 
 // Scenario represents a complete retirement scenario for both employees
